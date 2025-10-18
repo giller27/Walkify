@@ -19,9 +19,9 @@ function Header() {
             width="30"
             className="d-inline-block align-top"
             alt="Logo"
-          />
-        </Navbar.Brand>{" "}
-        <text href="/">Walkify</text>
+          />{" "}
+          <text href="/">Walkify</text>
+        </Navbar.Brand>
         <Navbar.Toggle aria-controls="responsive-navbar-nav" />
         <Navbar.Collapse id="responsive-navbar-nav">
           <Nav className="mr-auto">
