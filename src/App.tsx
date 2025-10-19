@@ -3,7 +3,7 @@ import Alert from "./Components/Alert";
 import Button from "./Components/Button";
 import Navbar from "./Components/Navbar";
 import Header from "./Components/Header";
-import Map from "./Components/map";
+import Map from "./Components/Map";
 
 function App() {
   const [showAlert, setShowAlert] = useState(false);
