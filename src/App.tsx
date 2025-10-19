@@ -1,8 +1,8 @@
 import { useState } from "react";
-import Alert from "./Components/Alert";
-import Button from "./Components/Button";
-import Navbar from "./Components/Navbar";
-import Header from "./Components/Header";
+import Alert from "./components/Alert";
+import Button from "./components/Button";
+import Navbar from "./components/Navbar";
+import Header from "./components/Header";
 
 function App() {
   const [showAlert, setShowAlert] = useState(false);
