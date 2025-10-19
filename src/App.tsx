@@ -4,15 +4,16 @@ import Button from "./Components/Button";
 import Navbar from "./Components/Navbar";
 import Header from "./Components/Header";
 import Map from "./Components/Map";
+import RouteMap from "./Components/RouteMap";
 
 function App() {
   const [showAlert, setShowAlert] = useState(false);
   return (
     <div>
       <Header></Header>
-      {showAlert && <Alert onClose={() => setShowAlert(false)}>Alert</Alert>}
-      <Button onClicked={() => setShowAlert(true)}>OK</Button>
-      <Map></Map>
+      {/* {showAlert && <Alert onClose={() => setShowAlert(false)}>Alert</Alert>}
+      <Button onClicked={() => setShowAlert(true)}>OK</Button> */}
+      <RouteMap />
     </div>
   );
 }
