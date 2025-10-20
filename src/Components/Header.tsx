@@ -10,7 +10,7 @@ import logo from "./icon.png";
 
 function Header() {
   return (
-    <Navbar className="bg-success" collapseOnSelect expand="md" variant="dark">
+    <Navbar className="bg-success" collapseOnSelect expand="sm" variant="dark">
       <Container>
         <Navbar.Brand href="/">
           <img
@@ -30,6 +30,14 @@ function Header() {
             <Nav.Link href="/cont">Contacts</Nav.Link>
             <Nav.Link href="/blog">Blog</Nav.Link>
           </Nav>
+          <Form className="hstack g-2">
+            <input
+              type="text"
+              placeholder="Search"
+              className="mr-sm-2 form-control"
+            />
+            <Button>Search</Button>
+          </Form>
         </Navbar.Collapse>
       </Container>
     </Navbar>

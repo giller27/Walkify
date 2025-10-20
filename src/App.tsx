@@ -9,12 +9,13 @@ import RouteMap from "./Components/RouteMap";
 function App() {
   const [showAlert, setShowAlert] = useState(false);
   return (
-    <div>
+    <>
       <Header></Header>
       {/* {showAlert && <Alert onClose={() => setShowAlert(false)}>Alert</Alert>}
       <Button onClicked={() => setShowAlert(true)}>OK</Button> */}
+
       <RouteMap />
-    </div>
+    </>
   );
 }
 
