@@ -30,17 +30,19 @@ const RoutingMachine = ({ points }: { points: LatLngTuple[] }) => {
     if (!map || points.length < 2) return;
 
     // Використовуємо OSRM demo сервер для побудови реального маршруту
-    const routingControl = L.Routing.control({
+    const routingControl = (L.Routing.control as any)({
       waypoints: points.map((p) => L.latLng(p[0], p[1])),
       router: L.Routing.osrmv1({
         serviceUrl: "https://router.project-osrm.org/route/v1",
-        profile: "cycling", // тип маршруту: driving / cycling / walking
+        profile: "driving",
       }),
       lineOptions: {
         styles: [{ color: "#007bff", weight: 5, opacity: 0.9 }],
+        extendToWaypoints: true,
+        missingRouteTolerance: 0,
       },
       addWaypoints: false,
-      draggableWaypoints: false,
+      draggableWaypoints: false, // <-- тепер не свариться
       fitSelectedRoutes: true,
       routeWhileDragging: false,
       show: false,
