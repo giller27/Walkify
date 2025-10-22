@@ -115,6 +115,7 @@ function Header() {
       </ButtonGroup>
       <Router>
         <Routes>
+          <Route path="/" Component={Home} />
           <Route path="/home" Component={Home} />
           <Route path="/favs" Component={Favorites} />
           <Route path="/prof" Component={Profile} />
