@@ -1,8 +1,7 @@
-import React from "react";
 import map from "../assets/images/map.jpg";
 import Card from "../Components/Card";
 
-const Favorites = () => {
+function Favorites() {
   return (
     <div className="bg-success-subtle">
       <h1 className="text-center lh-lg">Favorites</h1>
@@ -58,6 +57,6 @@ const Favorites = () => {
       </div>
     </div>
   );
-};
+}
 
 export default Favorites;

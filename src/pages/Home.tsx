@@ -1,8 +1,7 @@
-import React from "react";
 import RouteMap from "../Components/RouteMap";
 
-const Home = () => {
+function Home() {
   return <RouteMap />;
-};
+}
 
 export default Home;
