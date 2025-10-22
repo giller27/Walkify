@@ -93,10 +93,10 @@ const RoutingMap = () => {
         </svg>
       </button>
       <MapContainer
-        className="z-0 bg-success-subtle border-5"
+        className="z-0 position-relative"
         center={[49.234, 28.469]} // Київ
         zoom={13}
-        style={{ height: "calc(100vh - 116px)", width: "100%", marginTop: "56px", borderRadius: "1%" }}
+        style={{ height: "92vh", width: "100%" }}
       >
         <TileLayer
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
