@@ -34,7 +34,7 @@ const RoutingMachine = ({ points }: { points: LatLngTuple[] }) => {
       waypoints: points.map((p) => L.latLng(p[0], p[1])),
       router: L.Routing.osrmv1({
         serviceUrl: "https://router.project-osrm.org/route/v1",
-        profile: "driving",
+        profile: "walking",
       }),
       lineOptions: {
         styles: [{ color: "#007bff", weight: 5, opacity: 0.9 }],
@@ -74,35 +74,23 @@ const RoutingMap = () => {
   const clearRoute = () => setPoints([]);
 
   return (
-    <div style={{ position: "relative" }}>
-      {/* Кнопка очищення */}
+    <div>
       <button
+        className="z-1 btn btn-success position-fixed end-0 m-2"
         onClick={clearRoute}
-        style={{
-          position: "absolute",
-          top: 10,
-          left: 10,
-          zIndex: 1000,
-          background: "#fff",
-          border: "1px solid #ccc",
-          borderRadius: "6px",
-          padding: "6px 12px",
-          cursor: "pointer",
-        }}
       >
         Очистити маршрут
       </button>
-
       <MapContainer
-        center={[50.45, 30.52]} // Київ
+        className="z-0 position-relative"
+        center={[49.234, 28.469]} // Київ
         zoom={13}
-        style={{ height: "100vh", width: "100%" }}
+        style={{ height: "92vh", width: "100%" }}
       >
         <TileLayer
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           attribution='&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a> contributors'
         />
-
         <MapClickHandler />
 
         {/* Відображення маркерів */}
@@ -114,7 +102,6 @@ const RoutingMap = () => {
             </Popup>
           </Marker>
         ))}
-
         {/* Компонент для побудови маршруту */}
         <RoutingMachine points={points} />
       </MapContainer>
