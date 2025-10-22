@@ -93,7 +93,7 @@ const RoutingMap = () => {
         </svg>
       </button>
       <MapContainer
-        className="z-0 position-relative"
+        className="z-0 position-relative rounded-5"
         center={[49.234, 28.469]} // Київ
         zoom={13}
         style={{ height: "92vh", width: "100%" }}

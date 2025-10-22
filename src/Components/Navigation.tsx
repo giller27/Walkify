@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   Navbar,
   Container,
@@ -5,19 +6,21 @@ import {
   Nav,
   Form,
   ButtonGroup,
+  Offcanvas,
 } from "react-bootstrap";
-import logo from "./icon.png";
+import logo from "../assets/images/icon.png";
 import Home from "../pages/Home";
 import Favorites from "../pages/Favorites";
 import Profile from "../pages/Profile";
 import Statistic from "../pages/Statistic";
 import { BrowserRouter as Router, Route, Routes } from "react-router-dom";
 
-function Header() {
+function Navigation() {
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
   return (
     <>
       <Navbar
-        className="bg-success rounded-bottom-3"
+        className="bg-success"
         expand="true"
         variant="dark"
         collapseOnSelect
@@ -33,27 +36,40 @@ function Header() {
             />{" "}
             <text href="/home">Walkify</text>
           </Navbar.Brand>
-          <Navbar.Toggle aria-controls="responsive-navbar-nav" />
-          <Navbar.Collapse id="responsive-navbar-nav">
-            <Nav className="mr-auto">
-              <Nav.Link href="/home">Home</Nav.Link>
-              <Nav.Link href="/favs">Favotites</Nav.Link>
-              <Nav.Link href="/prof">Profile</Nav.Link>
-              <Nav.Link href="/stat">Statistic</Nav.Link>
-            </Nav>
-            <Form className="hstack g-2">
-              <input
-                type="text"
-                placeholder="Search"
-                className="form-control me-2"
-              />
-              <Button>Search</Button>
-            </Form>
-          </Navbar.Collapse>
+          <Navbar.Toggle
+            aria-controls="offcanvas-navbar-nav"
+            onClick={() => setIsMenuOpen(true)}
+          />
+          <Offcanvas
+            show={isMenuOpen}
+            onHide={() => setIsMenuOpen(false)}
+            placement="end"
+            id="offcanvas-navbar-nav"
+          >
+            <Offcanvas.Header className="bg-success text-bg-dark" closeButton>
+              <Offcanvas.Title>Offcanvas</Offcanvas.Title>
+            </Offcanvas.Header>
+            <Offcanvas.Body className="bg-success text-bg-dark">
+              <Nav className="mr-auto">
+                <Nav.Link href="/home">Home</Nav.Link>
+                <Nav.Link href="/favs">Favotites</Nav.Link>
+                <Nav.Link href="/prof">Profile</Nav.Link>
+                <Nav.Link href="/stat">Statistic</Nav.Link>
+              </Nav>
+              <Form className="hstack g-2">
+                <input
+                  type="text"
+                  placeholder="Search"
+                  className="form-control me-2"
+                />
+                <Button>Search</Button>
+              </Form>
+            </Offcanvas.Body>
+          </Offcanvas>
         </Container>
       </Navbar>
       <ButtonGroup className="fixed-bottom">
-        <Button className="btn btn-success text-center" href="/home">
+        <Button className="btn btn-success text-center rounded-0" href="/home">
           <svg
             xmlns="http://www.w3.org/2000/svg"
             width="16"
@@ -98,7 +114,7 @@ function Header() {
           <br />
           Statistic
         </Button>
-        <Button className="btn btn-success text-center" href="/prof">
+        <Button className="btn btn-success text-center rounded-0" href="/prof">
           <svg
             xmlns="http://www.w3.org/2000/svg"
             width="16"
@@ -125,4 +141,4 @@ function Header() {
     </>
   );
 }
-export default Header;
+export default Navigation;
