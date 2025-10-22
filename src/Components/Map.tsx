@@ -1,26 +1,33 @@
-import React from "react";
-import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
-import "leaflet/dist/leaflet.css";
+import OpenRouteServiceRouter from "./OpenRouteServiceRouter"; // імпорт класу
+import { MapContainer, TileLayer, Marker, useMap } from "react-leaflet";
+import { useEffect } from "react";
+import L from "leaflet";
 
-const Map: React.FC = () => {
-  const position: [number, number] = [49.234841, 28.469612];
-  return (
-    <MapContainer
-      center={position}
-      zoom={13}
-      style={{ height: "100vh", width: "100%" }}
-    >
-      <TileLayer
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-      />
-      <Marker position={position}>
-        <Popup>
-          A pretty CSS3 popup. <br /> Easily cu stomizable.
-        </Popup>
-      </Marker>
-    </MapContainer>
+function RoutingMachine({ points }: { points: [number, number][] }) {
+  const map = useMap();
+
+  const router = new OpenRouteServiceRouter(
+    "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImM4MTMzMzc2NzE0ZjRhMDdhMGMyODUyOTJiMzExYWUzIiwiaCI6Im11cm11cjY0In0="
   );
-};
+  useEffect(() => {
+    if (!map) return;
 
-export default Map;
+    const routingControl = L.Routing.control({
+      waypoints: points.map((p) => L.latLng(p[0], p[1])),
+      router,
+      lineOptions: { styles: [{ color: "#007bff", weight: 4 }] } as any,
+      addWaypoints: false,
+      show: false,
+      fitSelectedRoutes: true,
+    }).addTo(map);
+
+    // ✅ Функція очищення — видаляє контроль при зміні точок або демонтажі
+    return () => {
+      map.removeControl(routingControl);
+    };
+  }, [map, points]);
+
+  return null;
+}
+
+export default RoutingMachine;
