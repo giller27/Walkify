@@ -1,7 +1,6 @@
 import {
   Navbar,
   Container,
-  FormControl,
   Button,
   Nav,
   Form,
@@ -110,9 +109,8 @@ function Header() {
           <br></br>Profile
         </Button>
       </ButtonGroup>
-      <Router>
+      <Router basename="/home">
         <Routes>
-          <Route path="/" Component={Home} />
           <Route path="/home" Component={Home} />
           <Route path="/favs" Component={Favorites} />
           <Route path="/prof" Component={Profile} />
