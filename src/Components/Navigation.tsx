@@ -20,9 +20,10 @@ function Navigation() {
   return (
     <>
       <Navbar
-        className="bg-success"
+        className="bg-success sticky-top"
         expand="true"
         variant="dark"
+        style={{height: "60px"}}
         collapseOnSelect
       >
         <Container>
@@ -68,7 +69,7 @@ function Navigation() {
           </Offcanvas>
         </Container>
       </Navbar>
-      <ButtonGroup className="fixed-bottom">
+      <ButtonGroup className="fixed-bottom" style={{height: "60px"}}>
         <Button className="btn btn-success text-center rounded-0" href="/home">
           <i className="bi bi-house"></i>
           <br />

@@ -83,10 +83,10 @@ const RoutingMap = () => {
         <i className="bi bi-trash"></i>
       </button>
       <MapContainer
-        className="z-0 position-relative bg-red"
+        className="z-0 position-relative bg-success-subtle"
         center={[49.234, 28.469]} // Київ
         zoom={13}
-        style={{ height: "92vh", width: "100%" }}
+        style={{ height: "calc(100dvh - 120px)", width: "100%" }}
       >
         <TileLayer
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
