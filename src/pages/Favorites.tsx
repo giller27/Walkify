@@ -3,7 +3,7 @@ import Card from "../Components/Card";
 
 function Favorites() {
   return (
-    <div className="bg-success-subtle">
+    <div>
       <h1 className="text-center lh-lg">Favorites</h1>
       <div className="d-flex flex-wrap center justify-content-md-center">
         <Card
