@@ -9,6 +9,7 @@ import {
   Offcanvas,
 } from "react-bootstrap";
 import logo from "../assets/images/icon.png";
+import User from "../assets/images/user.png"
 import Home from "../pages/Home";
 import Favorites from "../pages/Favorites";
 import Profile from "../pages/Profile";
@@ -41,23 +42,44 @@ function Navigation() {
             aria-controls="offcanvas-navbar-nav"
             onClick={() => setIsMenuOpen(true)}
           />
+
           <Offcanvas
             show={isMenuOpen}
             onHide={() => setIsMenuOpen(false)}
             placement="end"
             id="offcanvas-navbar-nav"
+            backdropClassName="bg-success"
           >
             <Offcanvas.Header className="bg-success text-bg-dark" closeButton>
-              <Offcanvas.Title>Offcanvas</Offcanvas.Title>
+              <Offcanvas.Title>
+                <img
+                src={logo}
+                height="30"
+                width="30"
+                className="d-inline-block align-top"
+                alt="Logo"
+              />
+              {" "}
+              Walkify
+              </Offcanvas.Title>
             </Offcanvas.Header>
-            <Offcanvas.Body className="bg-success text-bg-dark">
-              <Nav className="mr-auto">
-                <Nav.Link href="/home">Home</Nav.Link>
-                <Nav.Link href="/favs">Favotites</Nav.Link>
-                <Nav.Link href="/prof">Profile</Nav.Link>
-                <Nav.Link href="/stat">Statistic</Nav.Link>
-              </Nav>
-              <Form className="hstack g-2">
+            <Offcanvas.Body 
+              className="bg-success text-bg-dark p-0"
+              >
+                <div className="d-flex m-2 mx-4 align-items-center">
+                <img
+                src={User}
+                height="40"
+                width="40"
+                className="d-inline-block text-center mx-1 me-2"
+                alt="User" />
+                <div>
+                <h1 className="fs-4 m-0">User-Name</h1>
+                <Nav.Link href="/prof" className="m-0">User-Profile</Nav.Link>
+                </div>
+                </div>
+
+              <Form className="hstack g-2 py-3 px-4">
                 <input
                   type="text"
                   placeholder="Search"
@@ -65,6 +87,18 @@ function Navigation() {
                 />
                 <Button>Search</Button>
               </Form>
+
+              <Nav className="px-4 mt-2">
+                <hr></hr>
+                <Nav.Link href="/home">Home</Nav.Link>
+                <hr></hr>
+                <Nav.Link href="/favs">Favotites</Nav.Link>
+                <hr></hr>
+                <Nav.Link href="/prof">Profile</Nav.Link>
+                <hr></hr>
+                <Nav.Link href="/stat">Statistic</Nav.Link>
+                <hr></hr>
+              </Nav>
             </Offcanvas.Body>
           </Offcanvas>
         </Container>
