@@ -132,13 +132,7 @@ useEffect(() => {
           Statistic
         </Button>
         <Button className="btn btn-success text-center rounded-0" href="/prof">
-          <img
-                  src={userInfo?.picture || User}
-                  height="16px"
-                  width="16px"
-                  className="rounded-circle"
-                  alt="User"
-                />
+          <i className="bi bi-person"></i>
           <br />
           Profile
         </Button>
