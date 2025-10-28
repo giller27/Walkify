@@ -16,10 +16,15 @@ import Profile from "../pages/Profile";
 import Statistic from "../pages/Statistic";
 import { BrowserRouter as Router, Route, Routes } from "react-router-dom";
 
+interface GoogleUser {
+  name: string;
+  picture: string;
+}
+
 function Navigation() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
-  const [userInfo, setUserInfo] = useState(null);
+  const [userInfo, setUserInfo] = useState<GoogleUser | null>(null);
 
 useEffect(() => {
   const storedUser = localStorage.getItem("userInfo");

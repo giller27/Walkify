@@ -7,10 +7,17 @@ import { jwtDecode } from "jwt-decode"
 import { useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
 
+
+interface GoogleUser {
+  name: string;
+  picture: string;
+}
+
 function Profile() {
 
+  
   const navigate = useNavigate()
-  const [userInfo, setUserInfo] = useState(null);
+  const [userInfo, setUserInfo] = useState<GoogleUser | null>(null);
 
   useEffect(() => {
   const storedUser = localStorage.getItem("userInfo");
@@ -24,29 +31,34 @@ function Profile() {
   googleLogout();
   setUserInfo(null);
   localStorage.removeItem("userInfo");
-  navigate("/");
 }
 
 
   return (
     <div>
-      <GoogleLogin 
-      onSuccess={(credentialResponse) => {
-  const decoded = jwtDecode(credentialResponse.credential);
-  console.log(decoded);
+      {!userInfo && (
+  <GoogleLogin 
+    onSuccess={(credentialResponse) => {
+      if (!credentialResponse.credential) {
+        console.error("Missing credential");
+        return;
+      }
 
-  const user = {
-    name: decoded.name,
-    picture: decoded.picture,
-  };
+      const decoded = jwtDecode<GoogleUser>(credentialResponse.credential);
 
-  setUserInfo(user);
-  localStorage.setItem("userInfo", JSON.stringify(user));
-  navigate("/home");
-      }}
-  onError={() => console.log("Failed to login")}
-      auto_select={true}
-      />
+      const user: GoogleUser = {
+        name: decoded.name,
+        picture: decoded.picture,
+      };
+
+      setUserInfo(user);
+      localStorage.setItem("userInfo", JSON.stringify(user));
+      navigate("/home");
+    }}
+    onError={() => console.log("Failed to login")}
+    auto_select={true}
+  />
+)}
 
 
     <header className="d-flex flex-column align-items-center my-3">
