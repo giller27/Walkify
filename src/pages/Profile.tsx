@@ -1,21 +1,65 @@
 import User from "../assets/images/user.png"
 import 'bootstrap/dist/js/bootstrap.bundle.min.js';
 
+import { GoogleLogin, googleLogout } from "@react-oauth/google";
+import { jwtDecode } from "jwt-decode" 
+
+import { useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
 
 function Profile() {
+
+  const navigate = useNavigate()
+  const [userInfo, setUserInfo] = useState(null);
+
+  useEffect(() => {
+  const storedUser = localStorage.getItem("userInfo");
+  if (storedUser) {
+    setUserInfo(JSON.parse(storedUser));
+  }
+}, []);
+
+
+  function handleLogout() {
+  googleLogout();
+  setUserInfo(null);
+  localStorage.removeItem("userInfo");
+  navigate("/");
+}
 
 
   return (
     <div>
+      <GoogleLogin 
+      onSuccess={(credentialResponse) => {
+  const decoded = jwtDecode(credentialResponse.credential);
+  console.log(decoded);
+
+  const user = {
+    name: decoded.name,
+    picture: decoded.picture,
+  };
+
+  setUserInfo(user);
+  localStorage.setItem("userInfo", JSON.stringify(user));
+  navigate("/home");
+      }}
+  onError={() => console.log("Failed to login")}
+      auto_select={true}
+      />
+
+
     <header className="d-flex flex-column align-items-center my-3">
-      <img
-        src={User}
-        height="60"
-        width="60"
-        className="d-inline-block text-center mx-1 me-2"
-        alt="User" />
-      <h1 className="mt-2">USER NAME</h1>  
-    </header>
+  <img
+    src={userInfo?.picture || User}
+    height="60"
+    width="60"
+    className="d-inline-block text-center mx-1 me-2 rounded-circle"
+    alt="User"
+  />
+  <h1 className="mt-2">{userInfo?.name || "USER NAME"}</h1>  
+</header>
+
 
       <div className="alert alert-primary alert-dismissible fade show mx-5" role="alert">
   <strong>Wanna break from the ads?</strong> Feel free with <a href="#" className="alert-link">WalkifyPlus</a>. <br/> Just <strong>$2</strong>/month for clean look and no distraction.
@@ -40,7 +84,7 @@ function Profile() {
           <i className="bi bi-envelope-paper mx-3"></i>
           Mailing settings</div>
         <hr />
-        <div>
+        <div onClick={handleLogout} role="button">
           <i className="bi bi-box-arrow-right mx-3"></i>
           Exit</div>
         <hr />

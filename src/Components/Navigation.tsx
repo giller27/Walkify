@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Navbar,
   Container,
@@ -18,6 +18,16 @@ import { BrowserRouter as Router, Route, Routes } from "react-router-dom";
 
 function Navigation() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+
+  const [userInfo, setUserInfo] = useState(null);
+
+useEffect(() => {
+  const storedUser = localStorage.getItem("userInfo");
+  if (storedUser) {
+    setUserInfo(JSON.parse(storedUser));
+  }
+}, []);
+
   return (
     <>
       <Navbar
@@ -68,16 +78,18 @@ function Navigation() {
               >
                 <div className="d-flex m-2 mx-4 align-items-center">
                 <img
-                src={User}
-                height="40"
-                width="40"
-                className="d-inline-block text-center mx-1 me-2"
-                alt="User" />
+                  src={userInfo?.picture || User}
+                  height="40"
+                  width="40"
+                  className="d-inline-block text-center mx-1 me-2 rounded-circle"
+                  alt="User"
+                />
                 <div>
-                <h1 className="fs-4 m-0">User-Name</h1>
-                <Nav.Link href="/prof" className="m-0">User-Profile</Nav.Link>
+                  <h1 className="fs-4 m-0">{userInfo?.name || "User-Name"}</h1>
+                  <Nav.Link href="/prof" className="m-0">User-Profile</Nav.Link>
                 </div>
-                </div>
+              </div>
+
 
               <Form className="hstack g-2 py-3 px-4">
                 <input
@@ -120,7 +132,13 @@ function Navigation() {
           Statistic
         </Button>
         <Button className="btn btn-success text-center rounded-0" href="/prof">
-          <i className="bi bi-person"></i>
+          <img
+                  src={userInfo?.picture || User}
+                  height="16px"
+                  width="16px"
+                  className="rounded-circle"
+                  alt="User"
+                />
           <br />
           Profile
         </Button>
