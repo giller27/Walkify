@@ -9,10 +9,8 @@ import {
 } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import "leaflet-routing-machine/dist/leaflet-routing-machine.css";
-import "leaflet-routing-machine";
 
-// 🧭 Виправлення іконок у Leaflet (для Vite/React)
+// 🧭 Іконки Leaflet
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl:
@@ -29,28 +27,55 @@ const RoutingMachine = ({ points }: { points: LatLngTuple[] }) => {
   useEffect(() => {
     if (!map || points.length < 2) return;
 
-    // Використовуємо OSRM demo сервер для побудови реального маршруту
-    const routingControl = (L.Routing.control as any)({
-      waypoints: points.map((p) => L.latLng(p[0], p[1])),
-      router: L.Routing.osrmv1({
-        serviceUrl: "https://router.project-osrm.org/route/v1",
-        profile: "foot-walking",
-      }),
-      lineOptions: {
-        styles: [{ color: "#007bff", weight: 5, opacity: 0.9 }],
-        extendToWaypoints: true,
-        missingRouteTolerance: 0,
-      },
-      addWaypoints: false,
-      draggableWaypoints: false, // <-- тепер не свариться
-      fitSelectedRoutes: true,
-      routeWhileDragging: false,
-      show: false,
-    }).addTo(map);
+    const fetchRoute = async () => {
+      const apiKey = "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImE3YzUxNmU2ZmMzYzQyMTQ4OTJhMWM4YWM1YTI2OWQ1IiwiaCI6Im11cm11cjY0In0="; // 🔑 встав свій ключ OpenRouteService
+      const coords = points.map((p) => [p[1], p[0]]); // [lng, lat] порядок!
 
-    return () => {
-      map.removeControl(routingControl);
+      try {
+        const res = await fetch(
+          "https://api.openrouteservice.org/v2/directions/foot-walking/geojson",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: apiKey,
+            },
+            body: JSON.stringify({
+              coordinates: coords,
+            }),
+          }
+        );
+
+        const data = await res.json();
+
+        // Якщо маршрут не знайдено
+        if (!data || !data.features || data.features.length === 0) {
+          console.error("Маршрут не знайдено:", data);
+          return;
+        }
+
+        // Додаємо geoJSON лінію на карту
+        const routeLayer = L.geoJSON(data, {
+          style: {
+            color: "green", // 💚 зелена лінія
+            weight: 5,
+            opacity: 0.9,
+          },
+        }).addTo(map);
+
+        // Масштаб до маршруту
+        map.fitBounds(routeLayer.getBounds());
+
+        // Очистка при зміні точок
+        return () => {
+          map.removeLayer(routeLayer);
+        };
+      } catch (error) {
+        console.error("Помилка побудови маршруту:", error);
+      }
     };
+
+    fetchRoute();
   }, [map, points]);
 
   return null;
@@ -59,7 +84,6 @@ const RoutingMachine = ({ points }: { points: LatLngTuple[] }) => {
 const RoutingMap = () => {
   const [points, setPoints] = useState<LatLngTuple[]>([]);
 
-  // 📍 Обробка кліку по карті
   const MapClickHandler = () => {
     useMapEvents({
       click(e) {
@@ -70,7 +94,6 @@ const RoutingMap = () => {
     return null;
   };
 
-  // 🔄 Очистка маршруту
   const clearRoute = () => setPoints([]);
 
   return (
@@ -83,8 +106,7 @@ const RoutingMap = () => {
         <i className="bi bi-trash"></i>
       </button>
       <MapContainer
-        className="z-0 position-relative bg-success-subtle"
-        center={[49.234, 28.469]} // Київ
+        center={[49.234, 28.469]}
         zoom={13}
         style={{ height: "calc(100dvh - 120px)", width: "100%" }}
       >
@@ -93,8 +115,6 @@ const RoutingMap = () => {
           attribution='&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a> contributors'
         />
         <MapClickHandler />
-
-        {/* Відображення маркерів */}
         {points.map((pos, index) => (
           <Marker key={index} position={pos}>
             <Popup>
@@ -103,7 +123,6 @@ const RoutingMap = () => {
             </Popup>
           </Marker>
         ))}
-        {/* Компонент для побудови маршруту */}
         <RoutingMachine points={points} />
       </MapContainer>
     </div>
