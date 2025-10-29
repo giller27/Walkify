@@ -36,7 +36,7 @@ useEffect(() => {
   return (
     <>
       <Navbar
-        className="bg-success sticky-top"
+        className="bg-success fixed-top"
         expand="true"
         variant="dark"
         style={{height: "60px"}}
@@ -63,7 +63,7 @@ useEffect(() => {
             onHide={() => setIsMenuOpen(false)}
             placement="end"
             id="offcanvas-navbar-nav"
-            backdropClassName="bg-success"
+            backdropClassName="bg-success static"
           >
             <Offcanvas.Header className="bg-success text-bg-dark" closeButton>
               <Offcanvas.Title>

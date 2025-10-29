@@ -105,7 +105,8 @@ const RoutingMap = () => {
       >
         <i className="bi bi-trash"></i>
       </button>
-      <MapContainer
+      <MapContainer 
+      className="z-0"
         center={[49.234, 28.469]}
         zoom={13}
         style={{ height: "calc(100dvh - 120px)", width: "100%" }}
