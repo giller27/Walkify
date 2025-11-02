@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+// src/Components/RouteMap.tsx
+import React, { useEffect, useRef, useState } from "react";
 import {
   MapContainer,
   TileLayer,
@@ -10,7 +11,6 @@ import {
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
-// 🧭 Іконки Leaflet
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl:
@@ -21,110 +21,201 @@ L.Icon.Default.mergeOptions({
 
 type LatLngTuple = [number, number];
 
-const RoutingMachine = ({ points }: { points: LatLngTuple[] }) => {
+const ORS_API_KEY = "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImE3YzUxNmU2ZmMzYzQyMTQ4OTJhMWM4YWM1YTI2OWQ1IiwiaCI6Im11cm11cjY0In0="; // <-- встав свій ключ
+
+// ================= RoutingMachine (малює маршрут та слухає сигнал очистки) =================
+const RoutingMachine = ({
+  points,
+  clearSignal,
+  onRouteDrawn,
+}: {
+  points: LatLngTuple[];
+  clearSignal: number;
+  onRouteDrawn?: (layer: L.Layer | null) => void;
+}) => {
   const map = useMap();
+  const routeLayerRef = useRef<L.Layer | null>(null);
+  const lastClearSignalRef = useRef<number>(clearSignal);
+
+  // Функція, що видаляє шар маршруту якщо він є
+  const removeRouteLayer = () => {
+    if (routeLayerRef.current) {
+      try {
+        map.removeLayer(routeLayerRef.current);
+      } catch (e) {
+        // ignore
+      }
+      routeLayerRef.current = null;
+      if (onRouteDrawn) onRouteDrawn(null);
+    }
+  };
+
+  // Якщо сигнал про очистку змінився — видаляємо шар
+  useEffect(() => {
+    if (clearSignal !== lastClearSignalRef.current) {
+      lastClearSignalRef.current = clearSignal;
+      removeRouteLayer();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clearSignal]);
 
   useEffect(() => {
-    if (!map || points.length < 2) return;
+    if (!map) return;
+    // завжди видаляємо попередній шар перед побудовою нового
+    removeRouteLayer();
 
-    const fetchRoute = async () => {
-      const apiKey = "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImE3YzUxNmU2ZmMzYzQyMTQ4OTJhMWM4YWM1YTI2OWQ1IiwiaCI6Im11cm11cjY0In0="; // 🔑 встав свій ключ OpenRouteService
-      const coords = points.map((p) => [p[1], p[0]]); // [lng, lat] порядок!
+    if (!points || points.length < 2) return;
 
+    let isCanceled = false;
+
+    const fetchAndDraw = async () => {
       try {
+        const coords = points.map((p) => [p[1], p[0]]); // [lng, lat]
         const res = await fetch(
           "https://api.openrouteservice.org/v2/directions/foot-walking/geojson",
           {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              Authorization: apiKey,
+              Authorization: ORS_API_KEY,
             },
-            body: JSON.stringify({
-              coordinates: coords,
-            }),
+            body: JSON.stringify({ coordinates: coords }),
           }
         );
 
+        if (!res.ok) {
+          const txt = await res.text();
+          throw new Error(`ORS ${res.status} ${res.statusText} - ${txt}`);
+        }
+
         const data = await res.json();
 
-        // Якщо маршрут не знайдено
+        if (isCanceled) return;
+
         if (!data || !data.features || data.features.length === 0) {
-          console.error("Маршрут не знайдено:", data);
+          console.warn("ORS returned no features", data);
           return;
         }
 
-        // Додаємо geoJSON лінію на карту
+        // створюємо шар і позначаємо його як маршрут (корисно при діагностиці)
         const routeLayer = L.geoJSON(data, {
-          style: {
-            color: "green", // 💚 зелена лінія
+          style: () => ({
+            color: "#28a745", // зелений
             weight: 5,
-            opacity: 0.9,
-          },
-        }).addTo(map);
+            opacity: 0.95,
+            lineCap: "round",
+            lineJoin: "round",
+          }),
+        });
 
-        // Масштаб до маршруту
-        map.fitBounds(routeLayer.getBounds());
+        // позначимо шар кастомним прапорцем (щоб можна було знайти)
+        (routeLayer as any)._isRouteLayer = true;
 
-        // Очистка при зміні точок
-        return () => {
-          map.removeLayer(routeLayer);
-        };
-      } catch (error) {
-        console.error("Помилка побудови маршруту:", error);
+        routeLayer.addTo(map);
+        routeLayerRef.current = routeLayer;
+
+        // масштабування карти
+        try {
+          const bounds = (routeLayer as any).getBounds();
+          if (bounds && bounds.isValid && bounds.isValid()) {
+            map.fitBounds(bounds, { padding: [40, 40] });
+          }
+        } catch (e) {
+          // ignore
+        }
+
+        if (onRouteDrawn) onRouteDrawn(routeLayer);
+      } catch (err) {
+        console.error("Routing error:", err);
       }
     };
 
-    fetchRoute();
-  }, [map, points]);
+    fetchAndDraw();
+
+    // cleanup при розмонтуванні або зміні точок
+    return () => {
+      isCanceled = true;
+      removeRouteLayer();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map, JSON.stringify(points)]); // stringify щоб спрацьовував при зміні coords
 
   return null;
 };
 
-const RoutingMap = () => {
+// ================= Головний компонент карти =================
+const RoutingMap: React.FC = () => {
   const [points, setPoints] = useState<LatLngTuple[]>([]);
+  const [clearSignal, setClearSignal] = useState<number>(0);
+  const routeLayerRefParent = useRef<L.Layer | null>(null);
 
   const MapClickHandler = () => {
     useMapEvents({
       click(e) {
         const { lat, lng } = e.latlng;
-        setPoints((prev) => [...prev, [lat, lng]]);
+        setPoints((prev) => {
+          // зберігаємо максимум 10 точок або інша логіка
+          return [...prev, [lat, lng]];
+        });
       },
     });
     return null;
   };
 
-  const clearRoute = () => setPoints([]);
+  const clearAll = () => {
+    setPoints([]);
+    // послати сигнал компоненту RoutingMachine, щоб він видалив шар всередині
+    setClearSignal((s) => s + 1);
+
+    // додаткова безпека: якщо батьківський реф має шар — теж видаляємо
+    if (routeLayerRefParent.current) {
+      try {
+        (routeLayerRefParent.current as any).remove();
+      } catch (e) {
+        // ignore
+      }
+      routeLayerRefParent.current = null;
+    }
+  };
 
   return (
     <div>
       <button
         className="z-1 btn btn-success position-fixed pb-2 rounded-circle"
         style={{ bottom: "80px", left: "20px" }}
-        onClick={clearRoute}
+        onClick={clearAll}
+        title="Очистити маршрут"
       >
         <i className="bi bi-trash"></i>
       </button>
-      <MapContainer 
-      className="z-0"
+
+      <MapContainer
         center={[49.234, 28.469]}
         zoom={13}
         style={{ height: "calc(100dvh - 120px)", width: "100%" }}
+        className="z-0"
       >
         <TileLayer
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           attribution='&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a> contributors'
         />
         <MapClickHandler />
-        {points.map((pos, index) => (
-          <Marker key={index} position={pos}>
+
+        {points.map((pos, idx) => (
+          <Marker key={idx} position={pos}>
             <Popup>
-              <strong>Точка {index + 1}</strong> <br />
+              <strong>Точка {idx + 1}</strong>
+              <br />
               {pos[0].toFixed(5)}, {pos[1].toFixed(5)}
             </Popup>
           </Marker>
         ))}
-        <RoutingMachine points={points} />
+
+        <RoutingMachine
+          points={points}
+          clearSignal={clearSignal}
+          onRouteDrawn={(layer) => (routeLayerRefParent.current = layer)}
+        />
       </MapContainer>
     </div>
   );

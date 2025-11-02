@@ -15,6 +15,7 @@ import Favorites from "../pages/Favorites";
 import Profile from "../pages/Profile";
 import Statistic from "../pages/Statistic";
 import { BrowserRouter as Router, Route, Routes } from "react-router-dom";
+import Security from "../pages/Security";
 
 interface GoogleUser {
   name: string;
@@ -149,6 +150,7 @@ useEffect(() => {
           <Route path="/favs" Component={Favorites} />
           <Route path="/prof" Component={Profile} />
           <Route path="/stat" Component={Statistic} />
+          <Route path="/security" Component={Security} />
         </Routes>
       </Router>
     </>

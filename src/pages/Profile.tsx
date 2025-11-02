@@ -5,7 +5,10 @@ import { GoogleLogin, googleLogout } from "@react-oauth/google";
 import { jwtDecode } from "jwt-decode" 
 
 import { useNavigate } from "react-router-dom";
+import { BrowserRouter as Router, Route, Routes } from "react-router-dom";
 import { useState, useEffect } from "react";
+import PersonalData from "./PersonalData";
+import Security from "./Security";
 
 
 interface GoogleUser {
@@ -105,6 +108,7 @@ function Profile() {
           Delete account</div>
         <hr />
       </nav>
+
     </div>
   )
 }
