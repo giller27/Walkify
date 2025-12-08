@@ -4,6 +4,7 @@ import { Form, Button, InputGroup } from "react-bootstrap";
 export interface WalkPreferences {
   locations: string[];
   distanceKm: number;
+  prompt?: string;
 }
 
 interface WalkPreferencesProps {
@@ -20,6 +21,7 @@ const WalkPreferencesBar: React.FC<WalkPreferencesProps> = ({
   const [locationInput, setLocationInput] = useState("");
   const [locations, setLocations] = useState<string[]>([]);
   const [distanceKm, setDistanceKm] = useState<number>(2);
+  const [prompt, setPrompt] = useState<string>("");
   const [isOpen, setIsOpen] = useState(false);
 
   const addLocation = () => {
@@ -39,6 +41,7 @@ const WalkPreferencesBar: React.FC<WalkPreferencesProps> = ({
       onGenerate({
         locations,
         distanceKm,
+        prompt,
       });
     }
   };
@@ -136,6 +139,22 @@ const WalkPreferencesBar: React.FC<WalkPreferencesProps> = ({
                   value={distanceKm}
                   onChange={(e) => setDistanceKm(Number(e.target.value))}
                   required
+                />
+              </div>
+
+              <div className="col-12 col-md-3">
+                <Form.Label className="small mb-1">
+                  <i className="bi bi-chat-dots"></i> Промпт маршруту
+                </Form.Label>
+                <Form.Control
+                  as="textarea"
+                  rows={1}
+                  placeholder="Напр.: Прогулянка на 2 години через парк з кав'ярнею та фіналом в АТБ"
+                  value={prompt}
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                    setPrompt(e.target.value)
+                  }
+                  style={{ resize: "none" }}
                 />
               </div>
 

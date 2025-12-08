@@ -320,6 +320,7 @@ const GeolocationControl = ({
 export interface WalkPreferences {
   locations: string[];
   distanceKm: number;
+  prompt?: string;
 }
 
 export interface RouteMapRef {
@@ -339,6 +340,50 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>((props, ref) =
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [generatedPoints, setGeneratedPoints] = useState<LatLngTuple[]>([]);
   const routeLayerRefParent = useRef<L.Layer | null>(null);
+
+  // --- Helpers to parse prompt into hints ---
+  const extractLocationsFromPrompt = (prompt?: string): string[] => {
+    if (!prompt) return [];
+    const lower = prompt.toLowerCase();
+    const keywords = [
+      "park",
+      "парк",
+      "cafe",
+      "кафе",
+      "coffee",
+      "кав'ярня",
+      "shop",
+      "магазин",
+      "mall",
+      "трц",
+      "atb",
+      "атб",
+      "silpo",
+      "сільпо",
+      "silpo",
+      "сільпо",
+      "supermarket",
+      "супермаркет",
+    ];
+    const found = keywords.filter((k) => lower.includes(k));
+    return Array.from(new Set(found));
+  };
+
+  const inferDistanceFromPrompt = (prompt?: string, fallbackKm = 3): number => {
+    if (!prompt) return fallbackKm;
+    const normalized = prompt.toLowerCase().replace(",", ".");
+    const hourMatch = normalized.match(/(\d+(?:\.\d+)?)\s*(год|hour|h)/);
+    const minMatch = normalized.match(/(\d+(?:\.\d+)?)\s*(хв|min)/);
+    if (hourMatch) {
+      const hrs = parseFloat(hourMatch[1]);
+      if (!Number.isNaN(hrs) && hrs > 0) return Math.max(1, Math.min(hrs * 4.5, 50));
+    }
+    if (minMatch) {
+      const mins = parseFloat(minMatch[1]);
+      if (!Number.isNaN(mins) && mins > 0) return Math.max(1, Math.min((mins / 60) * 4.5, 50));
+    }
+    return fallbackKm;
+  };
 
   const MapClickHandler = () => {
     useMapEvents({
@@ -385,9 +430,26 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>((props, ref) =
 
     setIsGenerating(true);
     try {
+      // Merge prompt-derived hints with manual locations
+      const promptLocations = extractLocationsFromPrompt(preferences.prompt);
+      const combinedLocations = Array.from(
+        new Set([...preferences.locations, ...promptLocations])
+      );
+      if (combinedLocations.length === 0) {
+        alert("Додайте місця або промпт із цілями маршруту");
+        setIsGenerating(false);
+        return;
+      }
+
+      // Determine distance
+      const targetDistanceKm = inferDistanceFromPrompt(
+        preferences.prompt,
+        preferences.distanceKm || 3
+      );
+
       // Geocode all locations
       const locationCoords: LatLngTuple[] = [];
-      for (const location of preferences.locations) {
+      for (const location of combinedLocations) {
         const coords = await geocodeLocation(location);
         if (coords) {
           locationCoords.push(coords);
@@ -407,7 +469,7 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>((props, ref) =
 
       // Calculate average walking speed (km/h) - typical is 4-5 km/h
       const walkingSpeedKmh = 4.5;
-      const maxDistanceMeters = preferences.distanceKm * 1000;
+      const maxDistanceMeters = targetDistanceKm * 1000;
 
       // Start with user location
       const routePoints: LatLngTuple[] = [userLocation];
@@ -459,7 +521,7 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>((props, ref) =
       setPoints(routePoints);
       setClearSignal((s) => s + 1); // Clear previous route
       if (props.onRouteSummary) {
-        const includedLocations = preferences.locations.slice(0, routePoints.length - 1);
+        const includedLocations = combinedLocations.slice(0, routePoints.length - 1);
         const summaryText =
           routePoints.length > 1
             ? `Маршрут стартує з вашої локації та включає: ${includedLocations.join(
@@ -505,7 +567,7 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>((props, ref) =
     <div>
       <button
         className="z-1 btn btn-success position-fixed pb-2 rounded-circle"
-        style={{ bottom: "160px", left: "20px" }}
+        style={{ bottom: "80px", left: "20px" }}
         onClick={clearAll}
         title="Очистити маршрут"
       >
@@ -515,7 +577,7 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>((props, ref) =
       <MapContainer
         center={[49.234, 28.469]}
         zoom={13}
-        style={{ height: "calc(100dvh - 260px)", width: "100%" }}
+        style={{ height: "calc(100dvh - 120px)", width: "100%" }}
         className="z-0"
       >
         <TileLayer
