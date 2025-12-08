@@ -25,8 +25,8 @@ const createUserLocationIcon = (heading: number) => {
     html: `
       <div style="
         position: relative;
-        width: 40px;
-        height: 40px;
+        width: 50px;
+        height: 50px;
       ">
         <!-- Outer pulse ring -->
         <div style="
@@ -34,8 +34,8 @@ const createUserLocationIcon = (heading: number) => {
           top: 50%;
           left: 50%;
           transform: translate(-50%, -50%);
-          width: 40px;
-          height: 40px;
+          width: 50px;
+          height: 50px;
           border-radius: 50%;
           background: rgba(25, 135, 84, 0.2);
           animation: pulse 2s infinite;
@@ -46,36 +46,41 @@ const createUserLocationIcon = (heading: number) => {
           top: 50%;
           left: 50%;
           transform: translate(-50%, -50%);
-          width: 30px;
-          height: 30px;
+          width: 36px;
+          height: 36px;
           border-radius: 50%;
           background: rgba(25, 135, 84, 0.4);
           border: 2px solid white;
         "></div>
-        <!-- Inner dot with arrow -->
+        <!-- Inner dot with large arrow -->
         <div style="
           position: absolute;
           top: 50%;
           left: 50%;
-          transform: translate(-50%, -50%) rotate(${heading}deg);
-          width: 20px;
-          height: 20px;
+          transform: translate(-50%, -50%);
+          width: 28px;
+          height: 28px;
           border-radius: 50%;
           background: #198754;
           border: 3px solid white;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+          box-shadow: 0 2px 8px rgba(0,0,0,0.4);
           display: flex;
           align-items: center;
           justify-content: center;
         ">
+          <!-- Large arrow pointing in direction -->
           <div style="
-            width: 0;
-            height: 0;
-            border-left: 3px solid transparent;
-            border-right: 3px solid transparent;
-            border-bottom: 6px solid white;
-            margin-top: -8px;
-          "></div>
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) rotate(${heading}deg);
+            font-size: 18px;
+            font-weight: bold;
+            color: white;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.5);
+            line-height: 1;
+            margin-top: -2px;
+          ">&gt;</div>
         </div>
         <style>
           @keyframes pulse {
@@ -95,8 +100,8 @@ const createUserLocationIcon = (heading: number) => {
         </style>
       </div>
     `,
-    iconSize: [40, 40],
-    iconAnchor: [20, 20],
+    iconSize: [50, 50],
+    iconAnchor: [25, 25],
   });
 };
 
@@ -123,6 +128,34 @@ const geocodeLocation = async (locationName: string): Promise<LatLngTuple | null
   } catch (error) {
     console.error("Geocoding error:", error);
     return null;
+  }
+};
+
+// Search for POI (Points of Interest) near user location
+const searchNearbyPOI = async (
+  center: LatLngTuple,
+  query: string,
+  radius: number = 2000
+): Promise<LatLngTuple[]> => {
+  try {
+    const [lat, lng] = center;
+    // Use Nominatim to search for places near the user
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&lat=${lat}&lon=${lng}&radius=${radius}&limit=5`,
+      {
+        headers: {
+          "User-Agent": "Walkify App",
+        },
+      }
+    );
+    const data = await response.json();
+    if (data && data.length > 0) {
+      return data.map((item: any) => [parseFloat(item.lat), parseFloat(item.lon)]);
+    }
+    return [];
+  } catch (error) {
+    console.error("POI search error:", error);
+    return [];
   }
 };
 
@@ -575,32 +608,84 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>((props, ref) =
       // Start with user location
       const routePoints: LatLngTuple[] = [currentLocation];
 
-      // If no locations found but prompt exists, create a simple circular route
+      // If no locations found but prompt exists, try to find POI based on prompt
       let finalDistanceKm = targetDistanceKm;
       if (locationCoords.length === 0) {
         if (preferences.prompt && preferences.prompt.trim()) {
-          // Create a simple circular route based on distance
-          // Calculate a point at the target distance away
-          const radiusKm = targetDistanceKm / (2 * Math.PI); // approximate radius for circular route
-          const radiusMeters = radiusKm * 1000;
+          // Try to extract keywords from prompt and search for nearby POI
+          const promptLower = preferences.prompt.toLowerCase();
+          const searchQueries: string[] = [];
           
-          // Add 4 points in a square pattern around user location
-          const [lat, lng] = currentLocation;
-          const latOffset = radiusMeters / 111000; // approximate meters to degrees
-          const lngOffset = radiusMeters / (111000 * Math.cos(lat * Math.PI / 180));
+          // Extract common location types from prompt
+          if (promptLower.includes("парк") || promptLower.includes("park")) {
+            searchQueries.push("park");
+          }
+          if (promptLower.includes("кафе") || promptLower.includes("cafe") || promptLower.includes("кав")) {
+            searchQueries.push("cafe");
+          }
+          if (promptLower.includes("магазин") || promptLower.includes("shop") || promptLower.includes("атб") || promptLower.includes("atb") || promptLower.includes("сільпо") || promptLower.includes("silpo")) {
+            searchQueries.push("supermarket");
+          }
+          if (promptLower.includes("ресторан") || promptLower.includes("restaurant")) {
+            searchQueries.push("restaurant");
+          }
+          if (promptLower.includes("музей") || promptLower.includes("museum")) {
+            searchQueries.push("museum");
+          }
+          if (promptLower.includes("церква") || promptLower.includes("church") || promptLower.includes("храм")) {
+            searchQueries.push("church");
+          }
           
-          routePoints.push([lat + latOffset, lng]);
-          routePoints.push([lat + latOffset, lng + lngOffset]);
-          routePoints.push([lat, lng + lngOffset]);
-          routePoints.push(currentLocation); // return to start
+          // Search for POI based on extracted keywords
+          const searchRadius = Math.min(targetDistanceKm * 500, 3000); // Search within reasonable radius
+          const foundPOIs: LatLngTuple[] = [];
           
-          // Calculate actual distance for circular route
-          if (routePoints.length > 1) {
-            let totalDistance = 0;
-            for (let i = 0; i < routePoints.length - 1; i++) {
-              totalDistance += calculateDistance(routePoints[i], routePoints[i + 1]);
+          for (const query of searchQueries) {
+            const pois = await searchNearbyPOI(currentLocation, query, searchRadius);
+            foundPOIs.push(...pois);
+          }
+          
+          // Remove duplicates (points that are very close to each other)
+          const uniquePOIs: LatLngTuple[] = [];
+          for (const poi of foundPOIs) {
+            const isDuplicate = uniquePOIs.some(
+              (existing) => calculateDistance(existing, poi) < 0.1 // Less than 100m apart
+            );
+            if (!isDuplicate) {
+              uniquePOIs.push(poi);
             }
-            finalDistanceKm = totalDistance;
+          }
+          
+          if (uniquePOIs.length > 0) {
+            // Use found POIs to create route
+            locationCoords.push(...uniquePOIs.slice(0, 5)); // Limit to 5 POIs
+            // Continue to route generation with POIs below
+          } else {
+            // If no POIs found, create a more natural circular route
+            const radiusKm = targetDistanceKm / (2 * Math.PI);
+            const radiusMeters = radiusKm * 1000;
+            const [lat, lng] = currentLocation;
+            const latOffset = radiusMeters / 111000;
+            const lngOffset = radiusMeters / (111000 * Math.cos(lat * Math.PI / 180));
+            
+            // Create a more natural route with 6 points in a circle
+            const numPoints = 6;
+            for (let i = 0; i < numPoints; i++) {
+              const angle = (i * 2 * Math.PI) / numPoints;
+              const pointLat = lat + latOffset * Math.cos(angle);
+              const pointLng = lng + lngOffset * Math.sin(angle);
+              routePoints.push([pointLat, pointLng]);
+            }
+            routePoints.push(currentLocation); // return to start
+            
+            // Calculate actual distance for circular route
+            if (routePoints.length > 1) {
+              let totalDistance = 0;
+              for (let i = 0; i < routePoints.length - 1; i++) {
+                totalDistance += calculateDistance(routePoints[i], routePoints[i + 1]);
+              }
+              finalDistanceKm = totalDistance;
+            }
           }
         } else {
           alert("Додайте місця або промпт із цілями маршруту");
@@ -610,7 +695,10 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>((props, ref) =
           }
           return;
         }
-      } else {
+      }
+      
+      // If we have location coordinates (either from manual input or POI search), create route
+      if (locationCoords.length > 0) {
         // Try to include locations within constraints
         // Simple approach: include locations that fit within distance/time constraints
         let currentDistance = 0;

@@ -75,7 +75,7 @@ const WalkPreferencesBar: React.FC<WalkPreferencesProps> = ({
       <button
         className="btn btn-success position-fixed rounded-circle"
         style={{
-          bottom: isOpen ? "360px" : "120px",
+          bottom: isOpen ? "420px" : "80px",
           left: "50%",
           transform: "translateX(-50%)",
           width: "48px",
@@ -93,7 +93,7 @@ const WalkPreferencesBar: React.FC<WalkPreferencesProps> = ({
       <div
         className="position-fixed w-100 bg-light border-top border-success border-3"
         style={{
-          bottom: isOpen ? "100px" : "-300px",
+          bottom: isOpen ? "60px" : "-500px",
           transition: "bottom 0.25s ease",
           zIndex: 1099,
           boxShadow: "0 -4px 16px rgba(0,0,0,0.2)",
