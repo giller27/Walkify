@@ -25,8 +25,8 @@ const createUserLocationIcon = (heading: number) => {
     html: `
       <div style="
         position: relative;
-        width: 40px;
-        height: 40px;
+        width: 50px;
+        height: 50px;
       ">
         <!-- Outer pulse ring -->
         <div style="
@@ -34,8 +34,8 @@ const createUserLocationIcon = (heading: number) => {
           top: 50%;
           left: 50%;
           transform: translate(-50%, -50%);
-          width: 40px;
-          height: 40px;
+          width: 50px;
+          height: 50px;
           border-radius: 50%;
           background: rgba(25, 135, 84, 0.2);
           animation: pulse 2s infinite;
@@ -45,25 +45,44 @@ const createUserLocationIcon = (heading: number) => {
           position: absolute;
           top: 50%;
           left: 50%;
-          transform: translate(-50%, -50%) rotate(${heading}deg);
-          width: 32px;
-          height: 32px;
+          transform: translate(-50%, -50%);
+          width: 40px;
+          height: 40px;
           border-radius: 50%;
           background: #198754;
-          border: 3px solid white;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+          border: 4px solid white;
+          box-shadow: 0 3px 10px rgba(0,0,0,0.4);
           display: flex;
           align-items: center;
           justify-content: center;
         ">
-          <!-- Play triangle pointing in direction -->
+          <!-- Large play triangle pointing in direction -->
           <div style="
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) rotate(${heading}deg);
             width: 0;
             height: 0;
-            border-left: 10px solid white;
-            border-top: 6px solid transparent;
-            border-bottom: 6px solid transparent;
-            margin-left: 2px;
+            border-left: 14px solid white;
+            border-top: 9px solid transparent;
+            border-bottom: 9px solid transparent;
+            margin-left: 3px;
+            filter: drop-shadow(0 1px 2px rgba(0,0,0,0.3));
+          "></div>
+          <!-- Additional arrow line for better visibility -->
+          <div style="
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) rotate(${heading}deg);
+            width: 2px;
+            height: 12px;
+            background: white;
+            margin-left: 8px;
+            margin-top: -6px;
+            border-radius: 1px;
+            filter: drop-shadow(0 1px 2px rgba(0,0,0,0.3));
           "></div>
         </div>
         <style>
@@ -84,8 +103,8 @@ const createUserLocationIcon = (heading: number) => {
         </style>
       </div>
     `,
-    iconSize: [40, 40],
-    iconAnchor: [20, 20],
+    iconSize: [50, 50],
+    iconAnchor: [25, 25],
   });
 };
 
@@ -115,6 +134,94 @@ const geocodeLocation = async (locationName: string): Promise<LatLngTuple | null
   }
 };
 
+// Map query types to OSM tags
+const getOSMTags = (query: string): { key: string; value: string }[] => {
+  const queryLower = query.toLowerCase();
+  const tags: { key: string; value: string }[] = [];
+  
+  if (queryLower.includes("park") || queryLower.includes("парк")) {
+    tags.push({ key: "leisure", value: "park" });
+    tags.push({ key: "landuse", value: "recreation_ground" });
+  }
+  if (queryLower.includes("cafe") || queryLower.includes("кафе") || queryLower.includes("кав")) {
+    tags.push({ key: "amenity", value: "cafe" });
+  }
+  if (queryLower.includes("shop") || queryLower.includes("магазин") || queryLower.includes("supermarket") || queryLower.includes("супермаркет")) {
+    tags.push({ key: "shop", value: "supermarket" });
+    tags.push({ key: "amenity", value: "marketplace" });
+  }
+  if (queryLower.includes("restaurant") || queryLower.includes("ресторан")) {
+    tags.push({ key: "amenity", value: "restaurant" });
+  }
+  if (queryLower.includes("museum") || queryLower.includes("музей")) {
+    tags.push({ key: "tourism", value: "museum" });
+  }
+  if (queryLower.includes("church") || queryLower.includes("церква") || queryLower.includes("храм")) {
+    tags.push({ key: "amenity", value: "place_of_worship" });
+  }
+  
+  return tags;
+};
+
+// Search for POI using Overpass API (more accurate than Nominatim)
+const searchNearbyPOIOverpass = async (
+  center: LatLngTuple,
+  tags: { key: string; value: string }[],
+  radius: number = 2000
+): Promise<LatLngTuple[]> => {
+  if (tags.length === 0) return [];
+  
+  try {
+    const [lat, lng] = center;
+    // Convert radius from meters to degrees (approximate)
+    const radiusDeg = radius / 111000;
+    
+    // Build Overpass QL query
+    const tagFilters = tags.map(tag => `["${tag.key}"="${tag.value}"]`).join("");
+    const query = `
+      [out:json][timeout:10];
+      (
+        node${tagFilters}(around:${radius},${lat},${lng});
+        way${tagFilters}(around:${radius},${lat},${lng});
+        relation${tagFilters}(around:${radius},${lat},${lng});
+      );
+      out center;
+    `;
+    
+    const response = await fetch("https://overpass-api.de/api/interpreter", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: `data=${encodeURIComponent(query)}`,
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Overpass API error: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    const results: LatLngTuple[] = [];
+    
+    if (data.elements) {
+      for (const element of data.elements) {
+        if (element.type === "node") {
+          results.push([element.lat, element.lon]);
+        } else if (element.center) {
+          results.push([element.center.lat, element.center.lon]);
+        } else if (element.lat && element.lon) {
+          results.push([element.lat, element.lon]);
+        }
+      }
+    }
+    
+    return results;
+  } catch (error) {
+    console.error("Overpass API error:", error);
+    return [];
+  }
+};
+
 // Search for POI (Points of Interest) near user location
 const searchNearbyPOI = async (
   center: LatLngTuple,
@@ -123,8 +230,17 @@ const searchNearbyPOI = async (
 ): Promise<LatLngTuple[]> => {
   try {
     const [lat, lng] = center;
-    // Use Nominatim to search for places near the user
-    // Try different search strategies
+    
+    // First try Overpass API (more accurate for POI)
+    const osmTags = getOSMTags(query);
+    if (osmTags.length > 0) {
+      const overpassResults = await searchNearbyPOIOverpass(center, osmTags, radius);
+      if (overpassResults.length > 0) {
+        return overpassResults.slice(0, 10); // Limit to 10 results
+      }
+    }
+    
+    // Fallback to Nominatim if Overpass doesn't return results
     const searchQueries = [
       `${query}`,
       `${query} near ${lat},${lng}`,
@@ -142,16 +258,13 @@ const searchNearbyPOI = async (
         );
         const data = await response.json();
         if (data && data.length > 0) {
-          // Filter and map results
-          const results = data
-            .map((item: any) => [parseFloat(item.lat), parseFloat(item.lon)]);
-          
+          const results = data.map((item: any) => [parseFloat(item.lat), parseFloat(item.lon)]);
           if (results.length > 0) {
             return results;
           }
         }
       } catch (err) {
-        console.warn("POI search attempt failed:", err);
+        console.warn("Nominatim search attempt failed:", err);
       }
     }
     return [];
@@ -619,7 +732,7 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>((props, ref) =
           const searchQueries: string[] = [];
           
           // Extract common location types from prompt
-          if (promptLower.includes("парк") || promptLower.includes("park")) {
+          if (promptLower.includes("парк") || promptLower.includes("park") || promptLower.includes("до парку") || promptLower.includes("до парка")) {
             searchQueries.push("park");
           }
           if (promptLower.includes("кафе") || promptLower.includes("cafe") || promptLower.includes("кав")) {
@@ -638,12 +751,33 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>((props, ref) =
             searchQueries.push("church");
           }
           
+          // If no specific keywords found, try to extract any location name from prompt
+          if (searchQueries.length === 0) {
+            // Try to find location names (words after "до", "в", "на")
+            const locationPatterns = [
+              /до\s+([а-яa-z]+)/i,
+              /в\s+([а-яa-z]+)/i,
+              /на\s+([а-яa-z]+)/i,
+            ];
+            
+            for (const pattern of locationPatterns) {
+              const match = promptLower.match(pattern);
+              if (match && match[1]) {
+                searchQueries.push(match[1]);
+                break;
+              }
+            }
+          }
+          
           // Search for POI based on extracted keywords
-          const searchRadius = Math.min(targetDistanceKm * 500, 3000); // Search within reasonable radius
+          const searchRadius = Math.min(targetDistanceKm * 500, 5000); // Increased search radius
           const foundPOIs: LatLngTuple[] = [];
           
-          for (const query of searchQueries) {
-            const pois = await searchNearbyPOI(currentLocation, query, searchRadius);
+          // Search for all queries in parallel
+          const poiPromises = searchQueries.map(query => searchNearbyPOI(currentLocation, query, searchRadius));
+          const poiResults = await Promise.all(poiPromises);
+          
+          for (const pois of poiResults) {
             foundPOIs.push(...pois);
           }
           
