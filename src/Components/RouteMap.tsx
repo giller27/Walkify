@@ -775,7 +775,8 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>((props, ref) =
           
           // Search for all queries in parallel (currentLocation is guaranteed to be non-null here)
           if (currentLocation) {
-            const poiPromises = searchQueries.map(query => searchNearbyPOI(currentLocation, query, searchRadius));
+            const location: LatLngTuple = currentLocation; // Type assertion for TypeScript
+            const poiPromises = searchQueries.map(query => searchNearbyPOI(location, query, searchRadius));
             const poiResults = await Promise.all(poiPromises);
             
             for (const pois of poiResults) {
@@ -802,7 +803,8 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>((props, ref) =
             // If no POIs found, try to search for generic "park" or create circular route
             // Try one more generic search
             if (currentLocation) {
-              const genericPOIs = await searchNearbyPOI(currentLocation, "park", Math.min(targetDistanceKm * 500, 3000));
+              const location: LatLngTuple = currentLocation; // Type assertion for TypeScript
+              const genericPOIs = await searchNearbyPOI(location, "park", Math.min(targetDistanceKm * 500, 3000));
               if (genericPOIs.length > 0) {
                 locationCoords.push(...genericPOIs.slice(0, 3));
               } else {
