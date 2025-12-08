@@ -319,7 +319,6 @@ const GeolocationControl = ({
 // ================= Головний компонент карти =================
 export interface WalkPreferences {
   locations: string[];
-  timeMinutes: number;
   distanceKm: number;
 }
 
@@ -328,7 +327,11 @@ export interface RouteMapRef {
   isGenerating: boolean;
 }
 
-const RoutingMap = React.forwardRef<RouteMapRef>((props, ref) => {
+type RoutingMapProps = {
+  onRouteSummary?: (summary: string) => void;
+};
+
+const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>((props, ref) => {
   const [points, setPoints] = useState<LatLngTuple[]>([]);
   const [clearSignal, setClearSignal] = useState<number>(0);
   const [userLocation, setUserLocation] = useState<LatLngTuple | null>(null);
@@ -396,13 +399,15 @@ const RoutingMap = React.forwardRef<RouteMapRef>((props, ref) => {
       if (locationCoords.length === 0) {
         alert("Не вдалося знайти жодного з вказаних місць");
         setIsGenerating(false);
+        if (props.onRouteSummary) {
+          props.onRouteSummary("Маршрут не згенеровано: жодну адресу не знайдено.");
+        }
         return;
       }
 
       // Calculate average walking speed (km/h) - typical is 4-5 km/h
       const walkingSpeedKmh = 4.5;
       const maxDistanceMeters = preferences.distanceKm * 1000;
-      const maxTimeSeconds = preferences.timeMinutes * 60;
 
       // Start with user location
       const routePoints: LatLngTuple[] = [userLocation];
@@ -410,7 +415,6 @@ const RoutingMap = React.forwardRef<RouteMapRef>((props, ref) => {
       // Try to include locations within constraints
       // Simple approach: include locations that fit within distance/time constraints
       let currentDistance = 0;
-      let currentTime = 0;
       const visited = new Set<number>();
 
       // Find closest locations first
@@ -432,14 +436,10 @@ const RoutingMap = React.forwardRef<RouteMapRef>((props, ref) => {
         if (closestIdx === -1) break;
 
         const distanceToAdd = closestDist * 1000; // convert to meters
-        const timeToAdd = (distanceToAdd / walkingSpeedKmh) * 3.6; // convert to seconds
-
         // Check if adding this location would exceed constraints
-        if (currentDistance + distanceToAdd <= maxDistanceMeters &&
-            currentTime + timeToAdd <= maxTimeSeconds) {
+        if (currentDistance + distanceToAdd <= maxDistanceMeters) {
           routePoints.push(locationCoords[closestIdx]);
           currentDistance += distanceToAdd;
-          currentTime += timeToAdd;
           visited.add(closestIdx);
         } else {
           break;
@@ -449,9 +449,7 @@ const RoutingMap = React.forwardRef<RouteMapRef>((props, ref) => {
       // Return to start if possible
       if (routePoints.length > 1) {
         const returnDist = calculateDistance(routePoints[routePoints.length - 1], userLocation) * 1000;
-        const returnTime = (returnDist / walkingSpeedKmh) * 3.6;
-        if (currentDistance + returnDist <= maxDistanceMeters &&
-            currentTime + returnTime <= maxTimeSeconds) {
+        if (currentDistance + returnDist <= maxDistanceMeters) {
           routePoints.push(userLocation);
         }
       }
@@ -460,13 +458,23 @@ const RoutingMap = React.forwardRef<RouteMapRef>((props, ref) => {
       setGeneratedPoints(routePoints);
       setPoints(routePoints);
       setClearSignal((s) => s + 1); // Clear previous route
+      if (props.onRouteSummary) {
+        const includedLocations = preferences.locations.slice(0, routePoints.length - 1);
+        const summaryText =
+          routePoints.length > 1
+            ? `Маршрут стартує з вашої локації та включає: ${includedLocations.join(
+                ", "
+              )}. Орієнтовна довжина: ${(currentDistance / 1000).toFixed(1)} км.`
+            : "Не вдалося побудувати маршрут з обраними параметрами.";
+        props.onRouteSummary(summaryText);
+      }
     } catch (error) {
       console.error("Route generation error:", error);
       alert("Помилка при генерації маршруту");
     } finally {
       setIsGenerating(false);
     }
-  }, [userLocation]);
+  }, [userLocation, props.onRouteSummary]);
 
   // Calculate distance between two points in kilometers (Haversine formula)
   const calculateDistance = (point1: LatLngTuple, point2: LatLngTuple): number => {

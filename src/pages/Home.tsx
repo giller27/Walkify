@@ -5,6 +5,7 @@ import WalkPreferencesBar from "../Components/WalkPreferences";
 function Home() {
   const routeMapRef = useRef<RouteMapRef>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [routeSummary, setRouteSummary] = useState("");
 
   // Update isGenerating state periodically
   useEffect(() => {
@@ -26,10 +27,11 @@ function Home() {
 
   return (
     <>
-      <RouteMap ref={routeMapRef} />
+      <RouteMap ref={routeMapRef} onRouteSummary={setRouteSummary} />
       <WalkPreferencesBar
         onGenerate={handleGenerate}
         isGenerating={isGenerating}
+        routeSummary={routeSummary}
       />
     </>
   );
