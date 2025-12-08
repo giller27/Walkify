@@ -3,7 +3,7 @@ import { Form, Button, InputGroup } from "react-bootstrap";
 
 export interface WalkPreferences {
   locations: string[];
-  distanceKm: number;
+  distanceKm?: number;
   prompt?: string;
 }
 
@@ -57,7 +57,7 @@ const WalkPreferencesBar: React.FC<WalkPreferencesProps> = ({
     // Allow generation even without locations (prompt is now primary)
     onGenerate({
       locations,
-      distanceKm,
+      distanceKm: distanceKm > 0 ? distanceKm : undefined,
       prompt,
     });
   };
@@ -75,7 +75,7 @@ const WalkPreferencesBar: React.FC<WalkPreferencesProps> = ({
       <button
         className="btn btn-success position-fixed rounded-circle"
         style={{
-          bottom: isOpen ? "320px" : "80px",
+          bottom: isOpen ? "360px" : "120px",
           left: "50%",
           transform: "translateX(-50%)",
           width: "48px",
@@ -93,7 +93,7 @@ const WalkPreferencesBar: React.FC<WalkPreferencesProps> = ({
       <div
         className="position-fixed w-100 bg-light border-top border-success border-3"
         style={{
-          bottom: isOpen ? "60px" : "-300px",
+          bottom: isOpen ? "100px" : "-300px",
           transition: "bottom 0.25s ease",
           zIndex: 1099,
           boxShadow: "0 -4px 16px rgba(0,0,0,0.2)",
@@ -167,15 +167,16 @@ const WalkPreferencesBar: React.FC<WalkPreferencesProps> = ({
               {/* Відстань - тепер необов'язкова */}
               <div className="col-12 col-md-3">
                 <Form.Label className="small mb-1">
-                  <i className="bi bi-arrows-angle-expand"></i> Відстань (км) 
+                  <i className="bi bi-arrows-angle-expand"></i> Відстань (км) <span className="text-muted">(необов'язково)</span>
                 </Form.Label>
                 <Form.Control
                   type="number"
                   min="0.5"
                   max="50"
                   step="0.5"
-                  value={distanceKm}
-                  onChange={(e) => setDistanceKm(Number(e.target.value))}
+                  value={distanceKm || ""}
+                  onChange={(e) => setDistanceKm(e.target.value ? Number(e.target.value) : 0)}
+                  placeholder="Автоматично"
                 />
               </div>
 

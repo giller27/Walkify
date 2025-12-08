@@ -128,7 +128,7 @@ function Favorites() {
       name: routeName,
       preferences: {
         locations,
-        distanceKm,
+        distanceKm: distanceKm > 0 ? distanceKm : undefined,
         prompt: prompt.trim() || undefined,
       },
       createdAt: new Date().toISOString(),
@@ -364,9 +364,13 @@ function Favorites() {
                 min="0.5"
                 max="50"
                 step="0.5"
-                value={distanceKm}
-                onChange={(e) => setDistanceKm(Number(e.target.value))}
+                value={distanceKm || ""}
+                onChange={(e) => setDistanceKm(e.target.value ? Number(e.target.value) : 0)}
+                placeholder="Автоматично"
               />
+              <Form.Text className="text-muted">
+                Якщо не вказано, відстань визначається автоматично з промпту
+              </Form.Text>
             </Form.Group>
           </Form>
         </Modal.Body>

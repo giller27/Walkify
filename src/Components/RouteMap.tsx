@@ -24,30 +24,79 @@ const createUserLocationIcon = (heading: number) => {
     className: "user-location-icon",
     html: `
       <div style="
-        width: 30px;
-        height: 30px;
-        border-radius: 50%;
-        background: #198754;
-        border: 3px solid white;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.3);
         position: relative;
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        width: 40px;
+        height: 40px;
       ">
+        <!-- Outer pulse ring -->
         <div style="
-          width: 0;
-          height: 0;
-          border-left: 4px solid transparent;
-          border-right: 4px solid transparent;
-          border-bottom: 8px solid white;
-          transform: rotate(${heading}deg);
-          margin-top: -4px;
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          width: 40px;
+          height: 40px;
+          border-radius: 50%;
+          background: rgba(25, 135, 84, 0.2);
+          animation: pulse 2s infinite;
         "></div>
+        <!-- Middle ring -->
+        <div style="
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          width: 30px;
+          height: 30px;
+          border-radius: 50%;
+          background: rgba(25, 135, 84, 0.4);
+          border: 2px solid white;
+        "></div>
+        <!-- Inner dot with arrow -->
+        <div style="
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%) rotate(${heading}deg);
+          width: 20px;
+          height: 20px;
+          border-radius: 50%;
+          background: #198754;
+          border: 3px solid white;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        ">
+          <div style="
+            width: 0;
+            height: 0;
+            border-left: 3px solid transparent;
+            border-right: 3px solid transparent;
+            border-bottom: 6px solid white;
+            margin-top: -8px;
+          "></div>
+        </div>
+        <style>
+          @keyframes pulse {
+            0% {
+              transform: translate(-50%, -50%) scale(1);
+              opacity: 0.7;
+            }
+            50% {
+              transform: translate(-50%, -50%) scale(1.5);
+              opacity: 0.3;
+            }
+            100% {
+              transform: translate(-50%, -50%) scale(2);
+              opacity: 0;
+            }
+          }
+        </style>
       </div>
     `,
-    iconSize: [30, 30],
-    iconAnchor: [15, 15],
+    iconSize: [40, 40],
+    iconAnchor: [20, 20],
   });
 };
 
@@ -363,6 +412,30 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>((props, ref) =
   const [generatedPoints, setGeneratedPoints] = useState<LatLngTuple[]>([]);
   const routeLayerRefParent = useRef<L.Layer | null>(null);
   const requestGeolocationRef = useRef<(() => void) | null>(null);
+  const geolocationPermissionRef = useRef<boolean>(false);
+
+  // Спробувати отримати геолокацію при завантаженні, якщо дозвіл вже надано
+  useEffect(() => {
+    if (navigator.geolocation && !userLocation) {
+      // Спробувати отримати кешовану позицію (не запитувати дозвіл)
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const { latitude, longitude } = position.coords;
+          setUserLocation([latitude, longitude]);
+          geolocationPermissionRef.current = true;
+        },
+        () => {
+          // Дозвіл не надано або помилка - це нормально, запитуватимемо пізніше
+          geolocationPermissionRef.current = false;
+        },
+        {
+          enableHighAccuracy: false,
+          timeout: 5000,
+          maximumAge: 300000, // Використовувати кешовану позицію до 5 хвилин
+        }
+      );
+    }
+  }, [userLocation]);
 
   // --- Helpers to parse prompt into hints ---
   const extractLocationsFromPrompt = (prompt?: string): string[] => {
@@ -434,8 +507,38 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>((props, ref) =
   };
 
   const generateRouteFromPreferences = React.useCallback(async (preferences: WalkPreferences) => {
-    if (!userLocation) {
-      alert("Будь ласка, увімкніть геолокацію спочатку");
+    // Якщо геолокація не ввімкнена, спробувати автоматично отримати
+    let currentLocation = userLocation;
+    
+    if (!currentLocation) {
+      // Спробувати отримати поточну позицію
+      if (navigator.geolocation) {
+        try {
+          const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, {
+              enableHighAccuracy: true,
+              timeout: 10000,
+              maximumAge: 300000, // Використовувати кешовану позицію до 5 хвилин
+            });
+          });
+          const { latitude, longitude } = position.coords;
+          currentLocation = [latitude, longitude];
+          setUserLocation(currentLocation);
+          geolocationPermissionRef.current = true;
+        } catch (error) {
+          alert("Будь ласка, надайте дозвіл на геолокацію для генерації маршруту");
+          setIsGenerating(false);
+          return;
+        }
+      } else {
+        alert("Геолокація не підтримується вашим браузером");
+        setIsGenerating(false);
+        return;
+      }
+    }
+    
+    if (!currentLocation) {
+      setIsGenerating(false);
       return;
     }
 
@@ -471,7 +574,7 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>((props, ref) =
       const maxDistanceMeters = targetDistanceKm * 1000;
 
       // Start with user location
-      const routePoints: LatLngTuple[] = [userLocation];
+      const routePoints: LatLngTuple[] = [currentLocation];
 
       // If no locations found but prompt exists, create a simple circular route
       let finalDistanceKm = targetDistanceKm;
@@ -483,14 +586,14 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>((props, ref) =
           const radiusMeters = radiusKm * 1000;
           
           // Add 4 points in a square pattern around user location
-          const [lat, lng] = userLocation;
+          const [lat, lng] = currentLocation;
           const latOffset = radiusMeters / 111000; // approximate meters to degrees
           const lngOffset = radiusMeters / (111000 * Math.cos(lat * Math.PI / 180));
           
           routePoints.push([lat + latOffset, lng]);
           routePoints.push([lat + latOffset, lng + lngOffset]);
           routePoints.push([lat, lng + lngOffset]);
-          routePoints.push(userLocation); // return to start
+          routePoints.push(currentLocation); // return to start
           
           // Calculate actual distance for circular route
           if (routePoints.length > 1) {
@@ -545,9 +648,9 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>((props, ref) =
 
         // Return to start if possible
         if (routePoints.length > 1) {
-          const returnDist = calculateDistance(routePoints[routePoints.length - 1], userLocation) * 1000;
+          const returnDist = calculateDistance(routePoints[routePoints.length - 1], currentLocation) * 1000;
           if (currentDistance + returnDist <= maxDistanceMeters) {
-            routePoints.push(userLocation);
+            routePoints.push(currentLocation);
           }
         }
 
@@ -598,7 +701,7 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>((props, ref) =
     } finally {
       setIsGenerating(false);
     }
-  }, [userLocation, props.onRouteSummary]);
+  }, [userLocation, props.onRouteSummary, props.onRouteGenerated]);
 
   // Calculate distance between two points in kilometers (Haversine formula)
   const calculateDistance = (point1: LatLngTuple, point2: LatLngTuple): number => {
@@ -627,7 +730,7 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>((props, ref) =
         }
       },
     }),
-    [generateRouteFromPreferences, isGenerating]
+    [generateRouteFromPreferences, isGenerating, userLocation]
   );
 
   return (
