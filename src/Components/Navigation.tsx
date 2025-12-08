@@ -20,6 +20,7 @@ import Security from "../pages/Security";
 interface GoogleUser {
   name: string;
   picture: string;
+  email: string;
 }
 
 function Navigation() {

@@ -6,7 +6,6 @@ import {
   Marker,
   Popup,
   useMap,
-  useMapEvents,
 } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -27,23 +26,23 @@ const createUserLocationIcon = (heading: number) => {
       <div style="
         width: 30px;
         height: 30px;
-        border-radius: 50% 50% 50% 0;
+        border-radius: 50%;
         background: #198754;
         border: 3px solid white;
-        transform: rotate(${heading}deg);
         box-shadow: 0 2px 5px rgba(0,0,0,0.3);
         position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
       ">
         <div style="
-          position: absolute;
-          top: -8px;
-          left: 50%;
-          transform: translateX(-50%);
           width: 0;
           height: 0;
-          border-left: 6px solid transparent;
-          border-right: 6px solid transparent;
-          border-top: 12px solid #198754;
+          border-left: 4px solid transparent;
+          border-right: 4px solid transparent;
+          border-bottom: 8px solid white;
+          transform: rotate(${heading}deg);
+          margin-top: -4px;
         "></div>
       </div>
     `,
@@ -202,9 +201,11 @@ const RoutingMachine = ({
 const GeolocationControl = ({
   onLocationUpdate,
   onHeadingUpdate,
+  onRequestGeolocationRef,
 }: {
   onLocationUpdate: (lat: number, lng: number) => void;
   onHeadingUpdate: (heading: number) => void;
+  onRequestGeolocationRef?: React.MutableRefObject<(() => void) | null>;
 }) => {
   const map = useMap();
   const [isActive, setIsActive] = useState(false);
@@ -288,11 +289,18 @@ const GeolocationControl = ({
     setIsActive(false);
   };
 
+  // Expose startGeolocation to parent via ref
   useEffect(() => {
+    if (onRequestGeolocationRef) {
+      onRequestGeolocationRef.current = startGeolocation;
+    }
     return () => {
+      if (onRequestGeolocationRef) {
+        onRequestGeolocationRef.current = null;
+      }
       stopGeolocation();
     };
-  }, []);
+  }, [onRequestGeolocationRef]);
 
   return (
     <button
@@ -308,7 +316,14 @@ const GeolocationControl = ({
         justifyContent: "center",
         boxShadow: "0 2px 5px rgba(0,0,0,0.3)",
       }}
-      onClick={isActive ? stopGeolocation : startGeolocation}
+      onClick={(e) => {
+        e.stopPropagation(); // Prevent map click event
+        if (isActive) {
+          stopGeolocation();
+        } else {
+          startGeolocation();
+        }
+      }}
       title={isActive ? "Зупинити геолокацію" : "Показати моє місцезнаходження"}
     >
       <i className={`bi bi-${isActive ? "geo-alt-fill" : "geo-alt"}`} style={{ fontSize: "20px" }}></i>
@@ -326,10 +341,17 @@ export interface WalkPreferences {
 export interface RouteMapRef {
   generateRoute: (preferences: WalkPreferences) => Promise<void>;
   isGenerating: boolean;
+  requestGeolocation: () => void;
 }
 
 type RoutingMapProps = {
   onRouteSummary?: (summary: string) => void;
+  onRouteGenerated?: (data: {
+    distanceKm: number;
+    locations: string[];
+    prompt?: string;
+    estimatedTimeMinutes: number;
+  }) => void;
 };
 
 const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>((props, ref) => {
@@ -340,6 +362,7 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>((props, ref) =
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [generatedPoints, setGeneratedPoints] = useState<LatLngTuple[]>([]);
   const routeLayerRefParent = useRef<L.Layer | null>(null);
+  const requestGeolocationRef = useRef<(() => void) | null>(null);
 
   // --- Helpers to parse prompt into hints ---
   const extractLocationsFromPrompt = (prompt?: string): string[] => {
@@ -385,18 +408,6 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>((props, ref) =
     return fallbackKm;
   };
 
-  const MapClickHandler = () => {
-    useMapEvents({
-      click(e) {
-        const { lat, lng } = e.latlng;
-        setPoints((prev) => {
-          // зберігаємо максимум 10 точок або інша логіка
-          return [...prev, [lat, lng]];
-        });
-      },
-    });
-    return null;
-  };
 
   const clearAll = () => {
     setPoints([]);
@@ -435,11 +446,8 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>((props, ref) =
       const combinedLocations = Array.from(
         new Set([...preferences.locations, ...promptLocations])
       );
-      if (combinedLocations.length === 0) {
-        alert("Додайте місця або промпт із цілями маршруту");
-        setIsGenerating(false);
-        return;
-      }
+      // Allow generation even without specific locations if prompt is provided
+      // The route can be generated based on prompt alone
 
       // Determine distance
       const targetDistanceKm = inferDistanceFromPrompt(
@@ -458,15 +466,6 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>((props, ref) =
         }
       }
 
-      if (locationCoords.length === 0) {
-        alert("Не вдалося знайти жодного з вказаних місць");
-        setIsGenerating(false);
-        if (props.onRouteSummary) {
-          props.onRouteSummary("Маршрут не згенеровано: жодну адресу не знайдено.");
-        }
-        return;
-      }
-
       // Calculate average walking speed (km/h) - typical is 4-5 km/h
       const walkingSpeedKmh = 4.5;
       const maxDistanceMeters = targetDistanceKm * 1000;
@@ -474,61 +473,124 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>((props, ref) =
       // Start with user location
       const routePoints: LatLngTuple[] = [userLocation];
 
-      // Try to include locations within constraints
-      // Simple approach: include locations that fit within distance/time constraints
-      let currentDistance = 0;
-      const visited = new Set<number>();
+      // If no locations found but prompt exists, create a simple circular route
+      let finalDistanceKm = targetDistanceKm;
+      if (locationCoords.length === 0) {
+        if (preferences.prompt && preferences.prompt.trim()) {
+          // Create a simple circular route based on distance
+          // Calculate a point at the target distance away
+          const radiusKm = targetDistanceKm / (2 * Math.PI); // approximate radius for circular route
+          const radiusMeters = radiusKm * 1000;
+          
+          // Add 4 points in a square pattern around user location
+          const [lat, lng] = userLocation;
+          const latOffset = radiusMeters / 111000; // approximate meters to degrees
+          const lngOffset = radiusMeters / (111000 * Math.cos(lat * Math.PI / 180));
+          
+          routePoints.push([lat + latOffset, lng]);
+          routePoints.push([lat + latOffset, lng + lngOffset]);
+          routePoints.push([lat, lng + lngOffset]);
+          routePoints.push(userLocation); // return to start
+          
+          // Calculate actual distance for circular route
+          if (routePoints.length > 1) {
+            let totalDistance = 0;
+            for (let i = 0; i < routePoints.length - 1; i++) {
+              totalDistance += calculateDistance(routePoints[i], routePoints[i + 1]);
+            }
+            finalDistanceKm = totalDistance;
+          }
+        } else {
+          alert("Додайте місця або промпт із цілями маршруту");
+          setIsGenerating(false);
+          if (props.onRouteSummary) {
+            props.onRouteSummary("Маршрут не згенеровано: необхідно вказати місця або промпт.");
+          }
+          return;
+        }
+      } else {
+        // Try to include locations within constraints
+        // Simple approach: include locations that fit within distance/time constraints
+        let currentDistance = 0;
+        const visited = new Set<number>();
 
-      // Find closest locations first
-      while (routePoints.length < locationCoords.length + 1 && visited.size < locationCoords.length) {
-        let closestIdx = -1;
-        let closestDist = Infinity;
-        const lastPoint = routePoints[routePoints.length - 1];
+        // Find closest locations first
+        while (routePoints.length < locationCoords.length + 1 && visited.size < locationCoords.length) {
+          let closestIdx = -1;
+          let closestDist = Infinity;
+          const lastPoint = routePoints[routePoints.length - 1];
 
-        for (let i = 0; i < locationCoords.length; i++) {
-          if (visited.has(i)) continue;
+          for (let i = 0; i < locationCoords.length; i++) {
+            if (visited.has(i)) continue;
 
-          const dist = calculateDistance(lastPoint, locationCoords[i]);
-          if (dist < closestDist) {
-            closestDist = dist;
-            closestIdx = i;
+            const dist = calculateDistance(lastPoint, locationCoords[i]);
+            if (dist < closestDist) {
+              closestDist = dist;
+              closestIdx = i;
+            }
+          }
+
+          if (closestIdx === -1) break;
+
+          const distanceToAdd = closestDist * 1000; // convert to meters
+          // Check if adding this location would exceed constraints
+          if (currentDistance + distanceToAdd <= maxDistanceMeters) {
+            routePoints.push(locationCoords[closestIdx]);
+            currentDistance += distanceToAdd;
+            visited.add(closestIdx);
+          } else {
+            break;
           }
         }
 
-        if (closestIdx === -1) break;
+        // Return to start if possible
+        if (routePoints.length > 1) {
+          const returnDist = calculateDistance(routePoints[routePoints.length - 1], userLocation) * 1000;
+          if (currentDistance + returnDist <= maxDistanceMeters) {
+            routePoints.push(userLocation);
+          }
+        }
 
-        const distanceToAdd = closestDist * 1000; // convert to meters
-        // Check if adding this location would exceed constraints
-        if (currentDistance + distanceToAdd <= maxDistanceMeters) {
-          routePoints.push(locationCoords[closestIdx]);
-          currentDistance += distanceToAdd;
-          visited.add(closestIdx);
-        } else {
-          break;
+        // Calculate final distance from actual points
+        if (routePoints.length > 1) {
+          let totalDistance = 0;
+          for (let i = 0; i < routePoints.length - 1; i++) {
+            totalDistance += calculateDistance(routePoints[i], routePoints[i + 1]);
+          }
+          finalDistanceKm = totalDistance;
         }
       }
 
-      // Return to start if possible
-      if (routePoints.length > 1) {
-        const returnDist = calculateDistance(routePoints[routePoints.length - 1], userLocation) * 1000;
-        if (currentDistance + returnDist <= maxDistanceMeters) {
-          routePoints.push(userLocation);
-        }
-      }
+      // Calculate estimated time (assuming 4.5 km/h walking speed)
+      const estimatedTimeMinutes = (finalDistanceKm / 4.5) * 60;
 
       // Set the generated points
       setGeneratedPoints(routePoints);
       setPoints(routePoints);
       setClearSignal((s) => s + 1); // Clear previous route
+      
       if (props.onRouteSummary) {
-        const includedLocations = combinedLocations.slice(0, routePoints.length - 1);
-        const summaryText =
-          routePoints.length > 1
-            ? `Маршрут стартує з вашої локації та включає: ${includedLocations.join(
-                ", "
-              )}. Орієнтовна довжина: ${(currentDistance / 1000).toFixed(1)} км.`
-            : "Не вдалося побудувати маршрут з обраними параметрами.";
+        let summaryText = "";
+        if (locationCoords.length === 0 && preferences.prompt) {
+          summaryText = `Маршрут згенеровано на основі промпту. Орієнтовна довжина: ${finalDistanceKm.toFixed(1)} км.`;
+        } else {
+          const includedLocations = combinedLocations.slice(0, Math.min(routePoints.length - 1, combinedLocations.length));
+          summaryText =
+            routePoints.length > 1
+              ? `Маршрут стартує з вашої локації${includedLocations.length > 0 ? ` та включає: ${includedLocations.join(", ")}` : ""}. Орієнтовна довжина: ${finalDistanceKm.toFixed(1)} км.`
+              : "Не вдалося побудувати маршрут з обраними параметрами.";
+        }
         props.onRouteSummary(summaryText);
+      }
+
+      // Callback for statistics
+      if (props.onRouteGenerated && routePoints.length > 1) {
+        props.onRouteGenerated({
+          distanceKm: finalDistanceKm,
+          locations: combinedLocations,
+          prompt: preferences.prompt,
+          estimatedTimeMinutes: estimatedTimeMinutes,
+        });
       }
     } catch (error) {
       console.error("Route generation error:", error);
@@ -553,12 +615,17 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>((props, ref) =
     return R * c;
   };
 
-  // Expose generateRouteFromPreferences to parent via ref
+  // Expose generateRouteFromPreferences and requestGeolocation to parent via ref
   React.useImperativeHandle(
     ref,
     () => ({
       generateRoute: generateRouteFromPreferences,
       isGenerating,
+      requestGeolocation: () => {
+        if (requestGeolocationRef.current) {
+          requestGeolocationRef.current();
+        }
+      },
     }),
     [generateRouteFromPreferences, isGenerating]
   );
@@ -584,10 +651,10 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>((props, ref) =
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           attribution='&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a> contributors'
         />
-        <MapClickHandler />
         <GeolocationControl
           onLocationUpdate={handleLocationUpdate}
           onHeadingUpdate={handleHeadingUpdate}
+          onRequestGeolocationRef={requestGeolocationRef}
         />
 
         {userLocation && (

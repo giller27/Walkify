@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Form, Button, InputGroup } from "react-bootstrap";
 
 export interface WalkPreferences {
@@ -11,18 +11,31 @@ interface WalkPreferencesProps {
   onGenerate: (preferences: WalkPreferences) => void;
   isGenerating?: boolean;
   routeSummary?: string;
+  onRequestGeolocation?: () => void;
+  initialPreferences?: WalkPreferences;
 }
 
 const WalkPreferencesBar: React.FC<WalkPreferencesProps> = ({
   onGenerate,
   isGenerating = false,
   routeSummary = "",
+  onRequestGeolocation,
+  initialPreferences,
 }) => {
   const [locationInput, setLocationInput] = useState("");
-  const [locations, setLocations] = useState<string[]>([]);
-  const [distanceKm, setDistanceKm] = useState<number>(2);
-  const [prompt, setPrompt] = useState<string>("");
+  const [locations, setLocations] = useState<string[]>(initialPreferences?.locations || []);
+  const [distanceKm, setDistanceKm] = useState<number>(initialPreferences?.distanceKm || 0);
+  const [prompt, setPrompt] = useState<string>(initialPreferences?.prompt || "");
   const [isOpen, setIsOpen] = useState(false);
+
+  // Оновити стан, якщо initialPreferences змінився
+  useEffect(() => {
+    if (initialPreferences) {
+      setLocations(initialPreferences.locations || []);
+      setDistanceKm(initialPreferences.distanceKm || 0);
+      setPrompt(initialPreferences.prompt || "");
+    }
+  }, [initialPreferences]);
 
   const addLocation = () => {
     if (locationInput.trim() && !locations.includes(locationInput.trim())) {
@@ -35,15 +48,18 @@ const WalkPreferencesBar: React.FC<WalkPreferencesProps> = ({
     setLocations(locations.filter((_, i) => i !== index));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (locations.length > 0) {
-      onGenerate({
-        locations,
-        distanceKm,
-        prompt,
-      });
+    // Request geolocation permission if handler is provided
+    if (onRequestGeolocation) {
+      onRequestGeolocation();
     }
+    // Allow generation even without locations (prompt is now primary)
+    onGenerate({
+      locations,
+      distanceKm,
+      prompt,
+    });
   };
 
   const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -77,7 +93,7 @@ const WalkPreferencesBar: React.FC<WalkPreferencesProps> = ({
       <div
         className="position-fixed w-100 bg-light border-top border-success border-3"
         style={{
-          bottom: isOpen ? "60px" : "-260px",
+          bottom: isOpen ? "60px" : "-300px",
           transition: "bottom 0.25s ease",
           zIndex: 1099,
           boxShadow: "0 -4px 16px rgba(0,0,0,0.2)",
@@ -86,6 +102,27 @@ const WalkPreferencesBar: React.FC<WalkPreferencesProps> = ({
         <div className="p-3">
           <Form onSubmit={handleSubmit}>
             <div className="row g-2 align-items-end">
+              {/* Промпт маршруту - переміщено на верх */}
+              <div className="col-12">
+                <Form.Label className="small mb-1">
+                  <i className="bi bi-chat-dots"></i> Промпт маршруту
+                </Form.Label>
+                <Form.Control
+                  as="textarea"
+                  rows={2}
+                  placeholder="Напр.: Прогулянка на 2 години через парк з кав'ярнею"
+                  value={prompt}
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                    setPrompt(e.target.value)
+                  }
+                  style={{ resize: "none" }}
+                />
+                <Form.Text className="text-muted small">
+                  Додаткові умови: місця та час нижче
+                </Form.Text>
+              </div>
+
+              {/* Місця для відвідування - тепер необов'язкові */}
               <div className="col-12 col-md-6">
                 <Form.Label className="small mb-1">
                   <i className="bi bi-geo-alt"></i> Місця для відвідування
@@ -127,9 +164,10 @@ const WalkPreferencesBar: React.FC<WalkPreferencesProps> = ({
                 )}
               </div>
 
+              {/* Відстань - тепер необов'язкова */}
               <div className="col-12 col-md-3">
                 <Form.Label className="small mb-1">
-                  <i className="bi bi-arrows-angle-expand"></i> Відстань (км)
+                  <i className="bi bi-arrows-angle-expand"></i> Відстань (км) 
                 </Form.Label>
                 <Form.Control
                   type="number"
@@ -138,32 +176,16 @@ const WalkPreferencesBar: React.FC<WalkPreferencesProps> = ({
                   step="0.5"
                   value={distanceKm}
                   onChange={(e) => setDistanceKm(Number(e.target.value))}
-                  required
                 />
               </div>
 
-              <div className="col-12 col-md-3">
-                <Form.Label className="small mb-1">
-                  <i className="bi bi-chat-dots"></i> Промпт маршруту
-                </Form.Label>
-                <Form.Control
-                  as="textarea"
-                  rows={1}
-                  placeholder="Напр.: Прогулянка на 2 години через парк з кав'ярнею та фіналом в АТБ"
-                  value={prompt}
-                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                    setPrompt(e.target.value)
-                  }
-                  style={{ resize: "none" }}
-                />
-              </div>
-
+              {/* Кнопка генерації */}
               <div className="col-12 col-md-3">
                 <Button
                   variant="success"
                   type="submit"
                   className="w-100"
-                  disabled={locations.length === 0 || isGenerating}
+                  disabled={(!prompt.trim() && locations.length === 0) || isGenerating}
                 >
                   {isGenerating ? (
                     <>

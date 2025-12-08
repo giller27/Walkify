@@ -14,6 +14,7 @@ import Security from "./Security";
 interface GoogleUser {
   name: string;
   picture: string;
+  email: string;
 }
 
 function Profile() {
@@ -47,11 +48,12 @@ function Profile() {
         return;
       }
 
-      const decoded = jwtDecode<GoogleUser>(credentialResponse.credential);
+      const decoded = jwtDecode<any>(credentialResponse.credential);
 
       const user: GoogleUser = {
-        name: decoded.name,
-        picture: decoded.picture,
+        name: decoded.name || "",
+        picture: decoded.picture || "",
+        email: decoded.email || "",
       };
 
       setUserInfo(user);
