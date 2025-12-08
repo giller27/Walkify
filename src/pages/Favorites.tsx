@@ -23,7 +23,7 @@ function Favorites() {
   const [routeName, setRouteName] = useState("");
   const [locationInput, setLocationInput] = useState("");
   const [locations, setLocations] = useState<string[]>([]);
-  const [distanceKm, setDistanceKm] = useState<number>(0);
+  const [distanceKm, setDistanceKm] = useState<number | undefined>(undefined);
   const [prompt, setPrompt] = useState<string>("");
   const [userInfo, setUserInfo] = useState<GoogleUser | null>(null);
 
@@ -128,7 +128,7 @@ function Favorites() {
       name: routeName,
       preferences: {
         locations,
-        distanceKm: distanceKm > 0 ? distanceKm : undefined,
+        distanceKm: distanceKm && distanceKm > 0 ? distanceKm : undefined,
         prompt: prompt.trim() || undefined,
       },
       createdAt: new Date().toISOString(),
@@ -142,7 +142,7 @@ function Favorites() {
     setRouteName("");
     setLocationInput("");
     setLocations([]);
-    setDistanceKm(0);
+    setDistanceKm(undefined);
     setPrompt("");
     setShowModal(false);
   };
@@ -241,7 +241,7 @@ function Favorites() {
                     )}
                   </div>
                 )}
-                {route.preferences.distanceKm > 0 && (
+                {route.preferences.distanceKm && route.preferences.distanceKm > 0 && (
                   <p className="small text-muted mb-2">
                     <i className="bi bi-arrows-angle-expand"></i>{" "}
                     {route.preferences.distanceKm} км
@@ -365,7 +365,7 @@ function Favorites() {
                 max="50"
                 step="0.5"
                 value={distanceKm || ""}
-                onChange={(e) => setDistanceKm(e.target.value ? Number(e.target.value) : 0)}
+                onChange={(e) => setDistanceKm(e.target.value ? Number(e.target.value) : undefined)}
                 placeholder="Автоматично"
               />
               <Form.Text className="text-muted">
