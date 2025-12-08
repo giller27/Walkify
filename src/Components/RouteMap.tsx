@@ -773,12 +773,14 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>((props, ref) =
           const searchRadius = Math.min(targetDistanceKm * 500, 5000); // Increased search radius
           const foundPOIs: LatLngTuple[] = [];
           
-          // Search for all queries in parallel
-          const poiPromises = searchQueries.map(query => searchNearbyPOI(currentLocation, query, searchRadius));
-          const poiResults = await Promise.all(poiPromises);
-          
-          for (const pois of poiResults) {
-            foundPOIs.push(...pois);
+          // Search for all queries in parallel (currentLocation is guaranteed to be non-null here)
+          if (currentLocation) {
+            const poiPromises = searchQueries.map(query => searchNearbyPOI(currentLocation, query, searchRadius));
+            const poiResults = await Promise.all(poiPromises);
+            
+            for (const pois of poiResults) {
+              foundPOIs.push(...pois);
+            }
           }
           
           // Remove duplicates (points that are very close to each other)
@@ -799,34 +801,34 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>((props, ref) =
           } else {
             // If no POIs found, try to search for generic "park" or create circular route
             // Try one more generic search
-            const genericPOIs = await searchNearbyPOI(currentLocation, "park", Math.min(targetDistanceKm * 500, 3000));
-            if (genericPOIs.length > 0) {
-              locationCoords.push(...genericPOIs.slice(0, 3));
-            } else {
-              // If still no POIs found, create a more natural circular route
-              const radiusKm = targetDistanceKm / (2 * Math.PI);
-              const radiusMeters = radiusKm * 1000;
-              const [lat, lng] = currentLocation;
-              const latOffset = radiusMeters / 111000;
-              const lngOffset = radiusMeters / (111000 * Math.cos(lat * Math.PI / 180));
-              
-              // Create a more natural route with 6 points in a circle
-              const numPoints = 6;
-              for (let i = 0; i < numPoints; i++) {
-                const angle = (i * 2 * Math.PI) / numPoints;
-                const pointLat = lat + latOffset * Math.cos(angle);
-                const pointLng = lng + lngOffset * Math.sin(angle);
-                routePoints.push([pointLat, pointLng]);
-              }
-              routePoints.push(currentLocation); // return to start
-              
-              // Calculate actual distance for circular route
-              if (routePoints.length > 1) {
-                let totalDistance = 0;
-                for (let i = 0; i < routePoints.length - 1; i++) {
-                  totalDistance += calculateDistance(routePoints[i], routePoints[i + 1]);
+            if (currentLocation) {
+              const genericPOIs = await searchNearbyPOI(currentLocation, "park", Math.min(targetDistanceKm * 500, 3000));
+              if (genericPOIs.length > 0) {
+                locationCoords.push(...genericPOIs.slice(0, 3));
+              } else {
+                // Create circular route
+                const radiusKm = targetDistanceKm / (2 * Math.PI);
+                const radiusMeters = radiusKm * 1000;
+                const [lat, lng] = currentLocation;
+                const latOffset = radiusMeters / 111000;
+                const lngOffset = radiusMeters / (111000 * Math.cos(lat * Math.PI / 180));
+                
+                const numPoints = 6;
+                for (let i = 0; i < numPoints; i++) {
+                  const angle = (i * 2 * Math.PI) / numPoints;
+                  const pointLat = lat + latOffset * Math.cos(angle);
+                  const pointLng = lng + lngOffset * Math.sin(angle);
+                  routePoints.push([pointLat, pointLng]);
                 }
-                finalDistanceKm = totalDistance;
+                routePoints.push(currentLocation);
+                
+                if (routePoints.length > 1) {
+                  let totalDistance = 0;
+                  for (let i = 0; i < routePoints.length - 1; i++) {
+                    totalDistance += calculateDistance(routePoints[i], routePoints[i + 1]);
+                  }
+                  finalDistanceKm = totalDistance;
+                }
               }
             }
           }
