@@ -24,7 +24,7 @@ const WalkPreferencesBar: React.FC<WalkPreferencesProps> = ({
 }) => {
   const [locationInput, setLocationInput] = useState("");
   const [locations, setLocations] = useState<string[]>(initialPreferences?.locations || []);
-  const [distanceKm, setDistanceKm] = useState<number>(initialPreferences?.distanceKm || 0);
+  const [distanceKm, setDistanceKm] = useState<number | undefined>(initialPreferences?.distanceKm);
   const [prompt, setPrompt] = useState<string>(initialPreferences?.prompt || "");
   const [isOpen, setIsOpen] = useState(false);
 
@@ -32,7 +32,7 @@ const WalkPreferencesBar: React.FC<WalkPreferencesProps> = ({
   useEffect(() => {
     if (initialPreferences) {
       setLocations(initialPreferences.locations || []);
-      setDistanceKm(initialPreferences.distanceKm || 0);
+      setDistanceKm(initialPreferences.distanceKm);
       setPrompt(initialPreferences.prompt || "");
     }
   }, [initialPreferences]);
@@ -57,7 +57,7 @@ const WalkPreferencesBar: React.FC<WalkPreferencesProps> = ({
     // Allow generation even without locations (prompt is now primary)
     onGenerate({
       locations,
-      distanceKm: distanceKm > 0 ? distanceKm : undefined,
+      distanceKm: distanceKm && distanceKm > 0 ? distanceKm : undefined,
       prompt,
     });
   };
@@ -175,9 +175,12 @@ const WalkPreferencesBar: React.FC<WalkPreferencesProps> = ({
                   max="50"
                   step="0.5"
                   value={distanceKm || ""}
-                  onChange={(e) => setDistanceKm(e.target.value ? Number(e.target.value) : 0)}
+                  onChange={(e) => setDistanceKm(e.target.value ? Number(e.target.value) : undefined)}
                   placeholder="Автоматично"
                 />
+                <Form.Text className="text-muted small">
+                  Залиште порожнім для автоматичного визначення
+                </Form.Text>
               </div>
 
               {/* Кнопка генерації */}

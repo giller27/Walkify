@@ -383,7 +383,7 @@ const GeolocationControl = ({
 // ================= Головний компонент карти =================
 export interface WalkPreferences {
   locations: string[];
-  distanceKm: number;
+  distanceKm?: number;
   prompt?: string;
 }
 
@@ -552,11 +552,10 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>((props, ref) =
       // Allow generation even without specific locations if prompt is provided
       // The route can be generated based on prompt alone
 
-      // Determine distance
-      const targetDistanceKm = inferDistanceFromPrompt(
-        preferences.prompt,
-        preferences.distanceKm || 3
-      );
+      // Determine distance - використовуємо distanceKm якщо вказано, інакше визначаємо з промпту або використовуємо 3 км за замовчуванням
+      const targetDistanceKm = preferences.distanceKm 
+        ? preferences.distanceKm 
+        : inferDistanceFromPrompt(preferences.prompt, 3);
 
       // Geocode all locations
       const locationCoords: LatLngTuple[] = [];
