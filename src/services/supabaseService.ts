@@ -1,11 +1,26 @@
 import { createClient } from '@supabase/supabase-js';
 
 // Ініціалізація Supabase клієнта
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
 
+// Логування для дебаггінгу
 if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-  throw new Error('Missing Supabase credentials in .env.local');
+  console.error('Missing Supabase credentials:', {
+    url: !!SUPABASE_URL,
+    key: !!SUPABASE_ANON_KEY,
+    env: {
+      importMeta: {
+        url: !!import.meta.env.VITE_SUPABASE_URL,
+        key: !!import.meta.env.VITE_SUPABASE_ANON_KEY,
+      },
+      process: {
+        url: !!process.env.VITE_SUPABASE_URL,
+        key: !!process.env.VITE_SUPABASE_ANON_KEY,
+      }
+    }
+  });
+  throw new Error('Missing Supabase credentials in .env.local. Please ensure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are set.');
 }
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
