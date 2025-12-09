@@ -1,65 +1,57 @@
 import { useState, useEffect } from "react";
-import { Card, Row, Col, Alert } from "react-bootstrap";
+import { Card, Row, Col, Alert, Spinner } from "react-bootstrap";
+import { useAuth } from "../context/AuthContext";
+import * as supabaseModules from "../services/supabaseService";
 
-interface GoogleUser {
-  name: string;
-  picture: string;
-  email: string;
-}
-
-export interface RouteStatistic {
-  id: string;
-  userEmail: string;
-  distanceKm: number;
-  locations: string[];
-  prompt?: string;
-  completedAt: string;
-  estimatedTimeMinutes?: number;
+interface WalkStat {
+  id?: string;
+  route_id?: string;
+  date: string;
+  distance_km: number;
+  duration_minutes: number;
+  pace: number;
+  notes?: string;
 }
 
 function Statistic() {
-  const [userInfo, setUserInfo] = useState<GoogleUser | null>(null);
-  const [statistics, setStatistics] = useState<RouteStatistic[]>([]);
+  const { user } = useAuth();
+  const [statistics, setStatistics] = useState<WalkStat[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [timeRange, setTimeRange] = useState<"all" | "week" | "month">("all");
-
-  // Завантажити інформацію користувача
-  useEffect(() => {
-    const storedUser = localStorage.getItem("userInfo");
-    if (storedUser) {
-      try {
-        const user = JSON.parse(storedUser);
-        setUserInfo(user);
-      } catch (e) {
-        console.error("Помилка завантаження інформації користувача:", e);
-      }
-    }
-  }, []);
 
   // Завантажити статистику для поточного користувача
   useEffect(() => {
-    if (!userInfo?.email) {
+    if (!user) {
       setStatistics([]);
       return;
     }
 
-    const allStatsStr = localStorage.getItem("routeStatistics");
-    if (allStatsStr) {
+    const loadStatistics = async () => {
       try {
-        const allStats: RouteStatistic[] = JSON.parse(allStatsStr);
-        const userStats = allStats.filter(
-          (stat) => stat.userEmail === userInfo.email
+        setLoading(true);
+        setError(null);
+        let allStats = await supabaseModules.getUserWalkStatistics(user.id);
+        // Упорядковуємо по даті з найновішим першим
+        allStats = allStats.sort(
+          (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
         );
-        setStatistics(userStats);
-      } catch (e) {
-        console.error("Помилка завантаження статистики:", e);
+        setStatistics(allStats as unknown as WalkStat[]);
+      } catch (err) {
+        setError("Помилка завантаження статистики");
+        console.error(err);
+      } finally {
+        setLoading(false);
       }
-    }
-  }, [userInfo]);
+    };
+
+    loadStatistics();
+  }, [user]);
 
   // Фільтрувати статистику за вибраним періодом
   const filteredStatistics = statistics.filter((stat) => {
     if (timeRange === "all") return true;
-    const statDate = new Date(stat.completedAt);
+    const statDate = new Date(stat.date);
     const now = new Date();
     const diffTime = now.getTime() - statDate.getTime();
     const diffDays = diffTime / (1000 * 60 * 60 * 24);
@@ -71,29 +63,17 @@ function Statistic() {
 
   // Розрахунок метрик
   const totalDistance = filteredStatistics.reduce(
-    (sum, stat) => sum + stat.distanceKm,
+    (sum, stat) => sum + stat.distance_km,
     0
   );
   const totalRoutes = filteredStatistics.length;
-  const averageDistance =
-    totalRoutes > 0 ? totalDistance / totalRoutes : 0;
+  const averageDistance = totalRoutes > 0 ? totalDistance / totalRoutes : 0;
   const totalTimeMinutes = filteredStatistics.reduce(
-    (sum, stat) => sum + (stat.estimatedTimeMinutes || 0),
+    (sum, stat) => sum + (stat.duration_minutes || 0),
     0
   );
   const totalTimeHours = totalTimeMinutes / 60;
-
-  // Найпопулярніші місця
-  const locationCounts: { [key: string]: number } = {};
-  filteredStatistics.forEach((stat) => {
-    stat.locations.forEach((loc) => {
-      locationCounts[loc] = (locationCounts[loc] || 0) + 1;
-    });
-  });
-  const popularLocations = Object.entries(locationCounts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
-    .map(([location, count]) => ({ location, count }));
+  const averagePace = totalDistance > 0 ? totalTimeMinutes / totalDistance : 0;
 
   // Статистика по днях тижня
   const dayStats: { [key: string]: number } = {
@@ -107,7 +87,7 @@ function Statistic() {
   };
 
   filteredStatistics.forEach((stat) => {
-    const date = new Date(stat.completedAt);
+    const date = new Date(stat.date);
     const dayNames = [
       "Неділя",
       "Понеділок",
@@ -121,30 +101,30 @@ function Statistic() {
     dayStats[dayName] = (dayStats[dayName] || 0) + 1;
   });
 
-  if (!userInfo) {
+  if (!user) {
     return (
-      <div style={{ paddingBottom: "80px" }} className="px-3">
+      <div className="px-3">
         <Alert variant="info" className="mt-3">
           <Alert.Heading>
             <i className="bi bi-info-circle me-2"></i>
             Потрібна авторизація
           </Alert.Heading>
-          <p>
-            Для перегляду статистики потрібно увійти через Google.
-          </p>
-          <hr />
-          <p className="mb-0">
-            <a href="/prof" className="btn btn-success">
-              Перейти до профілю
-            </a>
-          </p>
+          <p>Для перегляду статистики потрібно увійти у свій аккаунт.</p>
         </Alert>
       </div>
     );
   }
 
+  if (loading) {
+    return (
+      <div className="px-3 text-center py-5">
+        <Spinner animation="border" variant="success" />
+      </div>
+    );
+  }
+
   return (
-    <div style={{ paddingBottom: "80px" }} className="px-3">
+    <div className="px-3">
       <div className="d-flex justify-content-between align-items-center mb-4 mt-3">
         <h1 className="mb-0">
           <i className="bi bi-graph-up me-2"></i>
@@ -189,6 +169,8 @@ function Statistic() {
         </div>
       </div>
 
+      {error && <Alert variant="danger">{error}</Alert>}
+
       {totalRoutes === 0 ? (
         <Alert variant="secondary" className="mt-4">
           <Alert.Heading>
@@ -196,8 +178,8 @@ function Statistic() {
             Немає даних
           </Alert.Heading>
           <p>
-            У вас поки немає статистики. Створіть та використайте маршрути,
-            щоб побачити свою статистику тут.
+            У вас поки немає статистики. Завершіть прогулянки, щоб побачити свою
+            статистику.
           </p>
         </Alert>
       ) : (
@@ -211,7 +193,7 @@ function Statistic() {
                     <i className="bi bi-route"></i>
                   </div>
                   <Card.Title className="text-muted small">
-                    Всього маршрутів
+                    Всього прогулянок
                   </Card.Title>
                   <h2 className="mb-0">{totalRoutes}</h2>
                 </Card.Body>
@@ -256,54 +238,30 @@ function Statistic() {
                     Загальний час
                   </Card.Title>
                   <h2 className="mb-0">
-                    {totalTimeHours > 0
+                    {totalTimeHours > 1
                       ? `${totalTimeHours.toFixed(1)} год`
                       : `${totalTimeMinutes.toFixed(0)} хв`}
                   </h2>
                 </Card.Body>
               </Card>
             </Col>
-          </Row>
 
-          <Row className="g-3">
-            {/* Найпопулярніші місця */}
-            <Col xs={12} md={6}>
-              <Card className="h-100">
-                <Card.Header className="bg-success text-white">
-                  <h5 className="mb-0">
-                    <i className="bi bi-star-fill me-2"></i>
-                    Найпопулярніші місця
-                  </h5>
-                </Card.Header>
-                <Card.Body>
-                  {popularLocations.length > 0 ? (
-                    <div>
-                      {popularLocations.map((item, idx) => (
-                        <div
-                          key={idx}
-                          className="d-flex justify-content-between align-items-center mb-3 pb-3 border-bottom"
-                        >
-                          <div className="d-flex align-items-center">
-                            <span className="badge bg-success me-2">
-                              {idx + 1}
-                            </span>
-                            <span className="fw-bold">{item.location}</span>
-                          </div>
-                          <span className="text-muted">
-                            {item.count} {item.count === 1 ? "раз" : "разів"}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-muted text-center mb-0">
-                      Немає даних про місця
-                    </p>
-                  )}
+            <Col xs={12} sm={6} md={3}>
+              <Card className="h-100 border-success">
+                <Card.Body className="text-center">
+                  <div className="display-4 text-success mb-2">
+                    <i className="bi bi-hourglass"></i>
+                  </div>
+                  <Card.Title className="text-muted small">
+                    Середня тривалість
+                  </Card.Title>
+                  <h2 className="mb-0">{averagePace.toFixed(0)} хв/км</h2>
                 </Card.Body>
               </Card>
             </Col>
+          </Row>
 
+          <Row className="g-3">
             {/* Статистика по днях тижня */}
             <Col xs={12} md={6}>
               <Card className="h-100">
@@ -326,9 +284,7 @@ function Statistic() {
                           role="progressbar"
                           style={{
                             width: `${
-                              totalRoutes > 0
-                                ? (count / totalRoutes) * 100
-                                : 0
+                              totalRoutes > 0 ? (count / totalRoutes) * 100 : 0
                             }%`,
                           }}
                         ></div>
@@ -339,34 +295,71 @@ function Statistic() {
               </Card>
             </Col>
 
-            {/* Останні маршрути */}
+            {/* Топ дні по відстані */}
+            <Col xs={12} md={6}>
+              <Card className="h-100">
+                <Card.Header className="bg-success text-white">
+                  <h5 className="mb-0">
+                    <i className="bi bi-trophy me-2"></i>
+                    Найбільші відстані
+                  </h5>
+                </Card.Header>
+                <Card.Body>
+                  {filteredStatistics
+                    .slice()
+                    .sort((a, b) => b.distance_km - a.distance_km)
+                    .slice(0, 5)
+                    .map((stat, idx) => (
+                      <div
+                        key={stat.id}
+                        className="d-flex justify-content-between align-items-center mb-3 pb-3 border-bottom"
+                      >
+                        <div className="d-flex align-items-center">
+                          <span className="badge bg-success me-2">
+                            {idx + 1}
+                          </span>
+                          <div>
+                            <div className="small text-muted">
+                              {new Date(stat.date).toLocaleDateString("uk-UA")}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="text-end">
+                          <div className="fw-bold text-success">
+                            {stat.distance_km.toFixed(1)} км
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  {filteredStatistics.length === 0 && (
+                    <p className="text-muted text-center mb-0">Немає даних</p>
+                  )}
+                </Card.Body>
+              </Card>
+            </Col>
+
+            {/* Останні прогулянки */}
             <Col xs={12}>
               <Card>
                 <Card.Header className="bg-success text-white">
                   <h5 className="mb-0">
                     <i className="bi bi-clock-history me-2"></i>
-                    Останні маршрути
+                    Останні прогулянки
                   </h5>
                 </Card.Header>
                 <Card.Body>
-                  {filteredStatistics
-                    .sort(
-                      (a, b) =>
-                        new Date(b.completedAt).getTime() -
-                        new Date(a.completedAt).getTime()
-                    )
-                    .slice(0, 10)
-                    .map((stat) => (
+                  {filteredStatistics.length > 0 ? (
+                    filteredStatistics.slice(0, 10).map((stat) => (
                       <div
                         key={stat.id}
                         className="d-flex justify-content-between align-items-center mb-3 pb-3 border-bottom"
                       >
                         <div>
                           <div className="fw-bold">
-                            {stat.prompt || "Маршрут без опису"}
+                            {stat.notes || "Прогулянка"}
                           </div>
                           <div className="small text-muted">
-                            {new Date(stat.completedAt).toLocaleString("uk-UA", {
+                            {new Date(stat.date).toLocaleString("uk-UA", {
                               day: "2-digit",
                               month: "2-digit",
                               year: "numeric",
@@ -374,40 +367,20 @@ function Statistic() {
                               minute: "2-digit",
                             })}
                           </div>
-                          {stat.locations.length > 0 && (
-                            <div className="mt-1">
-                              {stat.locations.slice(0, 3).map((loc, idx) => (
-                                <span
-                                  key={idx}
-                                  className="badge bg-success me-1"
-                                  style={{ fontSize: "0.7rem" }}
-                                >
-                                  {loc}
-                                </span>
-                              ))}
-                              {stat.locations.length > 3 && (
-                                <span className="text-muted small">
-                                  +{stat.locations.length - 3}
-                                </span>
-                              )}
-                            </div>
-                          )}
                         </div>
                         <div className="text-end">
                           <div className="fw-bold text-success">
-                            {stat.distanceKm.toFixed(1)} км
+                            {stat.distance_km.toFixed(1)} км
                           </div>
-                          {stat.estimatedTimeMinutes && (
-                            <div className="small text-muted">
-                              ~{Math.round(stat.estimatedTimeMinutes)} хв
-                            </div>
-                          )}
+                          <div className="small text-muted">
+                            ~{Math.round(stat.duration_minutes)} хв
+                          </div>
                         </div>
                       </div>
-                    ))}
-                  {filteredStatistics.length === 0 && (
+                    ))
+                  ) : (
                     <p className="text-muted text-center mb-0">
-                      Немає маршрутів за вибраний період
+                      Немає прогулянок за вибраний період
                     </p>
                   )}
                 </Card.Body>

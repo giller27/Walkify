@@ -1,7 +1,8 @@
 import { useRef, useState, useEffect } from "react";
 import RouteMap, { RouteMapRef, WalkPreferences } from "../Components/RouteMap";
 import WalkPreferencesBar from "../Components/WalkPreferences";
-import { RouteStatistic } from "./Statistic";
+import { addWalkStatistic } from "../services/supabaseService";
+import { useAuth } from "../context/AuthContext";
 
 interface GoogleUser {
   name: string;
@@ -10,6 +11,7 @@ interface GoogleUser {
 }
 
 function Home() {
+  const { user } = useAuth();
   const routeMapRef = useRef<RouteMapRef>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [routeSummary, setRouteSummary] = useState("");
@@ -41,6 +43,19 @@ function Home() {
         console.error("Помилка завантаження маршруту:", e);
       }
     }
+
+    // Альтернативно, перевірити routeToView для уже збережених маршрутів
+    const routeToView = localStorage.getItem("routeToView");
+    if (routeToView) {
+      try {
+        const savedRoute = JSON.parse(routeToView);
+        // Передати маршрут з точками до RouteMap для візуалізації
+        localStorage.setItem("viewSavedRoute", JSON.stringify(savedRoute));
+        localStorage.removeItem("routeToView");
+      } catch (e) {
+        console.error("Помилка завантаження маршруту для перегляду:", e);
+      }
+    }
   }, []);
 
   // Update isGenerating state periodically
@@ -67,43 +82,30 @@ function Home() {
     }
   };
 
-  const handleRouteGenerated = (data: {
+  const handleRouteGenerated = async (data: {
     distanceKm: number;
     locations: string[];
     prompt?: string;
     estimatedTimeMinutes: number;
   }) => {
-    if (!userInfo?.email) {
-      return; // Не зберігаємо статистику, якщо користувач не авторизований
-    }
-
-    // Створити запис статистики
-    const statistic: RouteStatistic = {
-      id: Date.now().toString(),
-      userEmail: userInfo.email,
-      distanceKm: data.distanceKm,
-      locations: data.locations,
-      prompt: data.prompt,
-      completedAt: new Date().toISOString(),
-      estimatedTimeMinutes: data.estimatedTimeMinutes,
-    };
-
-    // Завантажити існуючу статистику
-    const allStatsStr = localStorage.getItem("routeStatistics");
-    let allStats: RouteStatistic[] = [];
-    if (allStatsStr) {
+    // Зберегти статистику в Supabase, якщо користувач авторизований
+    if (user) {
       try {
-        allStats = JSON.parse(allStatsStr);
-      } catch (e) {
-        console.error("Помилка парсингу статистики:", e);
+        await addWalkStatistic({
+          user_id: user.id,
+          date: new Date().toISOString(),
+          distance_km: data.distanceKm,
+          duration_minutes: data.estimatedTimeMinutes,
+          pace:
+            data.estimatedTimeMinutes > 0
+              ? data.distanceKm / (data.estimatedTimeMinutes / 60)
+              : 0,
+          notes: data.prompt || undefined,
+        });
+      } catch (err) {
+        console.error("Помилка збереження статистики:", err);
       }
     }
-
-    // Додати новий запис
-    allStats.push(statistic);
-
-    // Зберегти статистику
-    localStorage.setItem("routeStatistics", JSON.stringify(allStats));
   };
 
   // Автоматично згенерувати маршрут, якщо він завантажений
@@ -121,6 +123,29 @@ function Home() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadedRoute]);
+
+  // Завантажити збережений маршрут для перегляду
+  useEffect(() => {
+    const viewSavedRoute = localStorage.getItem("viewSavedRoute");
+    if (viewSavedRoute && routeMapRef.current) {
+      try {
+        const routeData = JSON.parse(viewSavedRoute);
+        const timer = setTimeout(async () => {
+          if (routeMapRef.current) {
+            setIsGenerating(true);
+            await routeMapRef.current.loadSavedRoute(routeData);
+            setIsGenerating(false);
+            localStorage.removeItem("viewSavedRoute");
+          }
+        }, 500);
+        return () => clearTimeout(timer);
+      } catch (e) {
+        console.error("Помилка завантаження збереженого маршруту:", e);
+        localStorage.removeItem("viewSavedRoute");
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <>
