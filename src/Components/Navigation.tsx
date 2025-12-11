@@ -198,9 +198,7 @@ function NavigationContent() {
                 <hr></hr>
                 {user && (
                   <>
-                    <Nav.Link href={`/user/${profile?.id || user?.id}`}>
-                      Profile
-                    </Nav.Link>
+                    <Nav.Link href={`/profile`}>Profile</Nav.Link>
                     <hr></hr>
                     <Nav.Link
                       href="/login"
@@ -248,7 +246,7 @@ function NavigationContent() {
         {user && (
           <Button
             className="btn btn-success text-center rounded-0"
-            href={`/user/${profile?.id || user?.id}`}
+            href={`/profile`}
           >
             <i className="bi bi-person"></i>
             <br />

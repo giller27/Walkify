@@ -226,39 +226,14 @@ function ViewUserProfile() {
                   </Col>
                 </Row>
               </div>
-
-              {currentUser?.id === id ? (
-                <>
-                  <Button
-                    variant="primary"
-                    className="w-100 mt-4 mb-2"
-                    onClick={() => navigate("/profile?edit=true")}
-                  >
-                    <i className="bi bi-pencil me-2"></i>
-                    Редагувати профіль
-                  </Button>
-                  <Button
-                    variant="outline-danger"
-                    className="w-100"
-                    onClick={async () => {
-                      await signOut();
-                      navigate("/login");
-                    }}
-                  >
-                    <i className="bi bi-box-arrow-right me-2"></i>
-                    Вихід
-                  </Button>
-                </>
-              ) : (
-                <Button
-                  variant="success"
-                  className="w-100 mt-4"
-                  onClick={() => navigate("/home")}
-                >
-                  <i className="bi bi-house me-2"></i>
-                  Назад на головну
-                </Button>
-              )}
+              <Button
+                variant="success"
+                className="w-100 mt-4"
+                onClick={() => navigate("/home")}
+              >
+                <i className="bi bi-house me-2"></i>
+                Назад на головну
+              </Button>
             </Card.Body>
           </Card>
         </Col>
