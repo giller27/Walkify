@@ -10,7 +10,7 @@ import {
   Alert,
   Modal,
 } from "react-bootstrap";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import {
   updateUserProfile,
@@ -18,21 +18,25 @@ import {
   getUserWalkStatistics,
   WalkStatistic,
 } from "../services/supabaseService";
+import user from "../assets/images/user.png";
 
 const Profile: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { user, profile, signOut } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [isEditing, setIsEditing] = useState(false);
+  const [isEditing, setIsEditing] = useState(
+    searchParams.get("edit") === "true"
+  );
   const [showStats, setShowStats] = useState(false);
   const [statistics, setStatistics] = useState<WalkStatistic[]>([]);
   const [statsLoading, setStatsLoading] = useState(false);
 
   const [formData, setFormData] = useState({
     full_name: "",
-    username: "",
+    email: "",
     bio: "",
   });
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
@@ -42,10 +46,12 @@ const Profile: React.FC = () => {
     if (profile) {
       setFormData({
         full_name: profile.full_name || "",
-        username: profile.username || "",
+        email: profile.email || "",
         bio: profile.bio || "",
       });
       setAvatarPreview(profile.avatar_url || null);
+      // Set document title to user's full name
+      document.title = `${profile.full_name || "Профіль"} | Walkify`;
     }
   }, [profile]);
 
@@ -86,7 +92,7 @@ const Profile: React.FC = () => {
 
       await updateUserProfile(user.id, {
         full_name: formData.full_name,
-        username: formData.username,
+        email: formData.email,
         bio: formData.bio,
         avatar_url: avatarUrl,
       });
@@ -198,16 +204,16 @@ const Profile: React.FC = () => {
                     }}
                   />
                 ) : (
-                  <div
-                    className="rounded-circle bg-secondary d-flex align-items-center justify-content-center"
+                  <img
+                    src={user}
+                    alt="Default Avatar"
+                    className="rounded-circle"
                     style={{
                       width: "120px",
                       height: "120px",
-                      margin: "0 auto",
+                      objectFit: "cover",
                     }}
-                  >
-                    <span style={{ fontSize: "48px", color: "white" }}>👤</span>
-                  </div>
+                  />
                 )}
               </div>
 
@@ -223,12 +229,20 @@ const Profile: React.FC = () => {
                   </Form.Group>
                 </div>
               )}
-
-              <h4 className="mb-2">
+              <h4
+                className="mb-1"
+                style={{ fontSize: "24px", fontWeight: "bold", color: "black" }}
+              >
                 {profile?.full_name || user?.email || "Користувач"}
               </h4>
-              <p className="text-muted mb-3">
-                @{profile?.username || user?.email?.split("@")[0] || "user"}
+              <p
+                style={{
+                  fontSize: "14px",
+                  color: "#6c757d",
+                  marginBottom: "24px",
+                }}
+              >
+                {user?.email}
               </p>
 
               {!isEditing ? (
@@ -303,7 +317,31 @@ const Profile: React.FC = () => {
               ) : (
                 <Form onSubmit={handleSaveProfile} className="text-start">
                   <Form.Group className="mb-3">
-                    <Form.Label>Full Name</Form.Label>
+                    <Form.Label>Змінити аватар</Form.Label>
+                    <Form.Control
+                      type="file"
+                      accept="image/*"
+                      onChange={handleAvatarChange}
+                      disabled={loading}
+                    />
+                    {avatarPreview && (
+                      <div className="mt-2 text-center">
+                        <img
+                          src={avatarPreview}
+                          alt="Avatar Preview"
+                          className="rounded-circle"
+                          style={{
+                            width: "80px",
+                            height: "80px",
+                            objectFit: "cover",
+                          }}
+                        />
+                      </div>
+                    )}
+                  </Form.Group>
+
+                  <Form.Group className="mb-3">
+                    <Form.Label>Повне ім'я</Form.Label>
                     <Form.Control
                       type="text"
                       name="full_name"
@@ -314,19 +352,19 @@ const Profile: React.FC = () => {
                   </Form.Group>
 
                   <Form.Group className="mb-3">
-                    <Form.Label>Username</Form.Label>
+                    <Form.Label>Email</Form.Label>
                     <Form.Control
                       type="text"
-                      name="username"
-                      value={formData.username}
+                      name="email"
+                      value={formData.email}
                       onChange={handleInputChange}
                       disabled={loading}
-                      placeholder="Choose a unique username"
+                      placeholder="Виберіть унікальну почту"
                     />
                   </Form.Group>
 
                   <Form.Group className="mb-3">
-                    <Form.Label>Bio</Form.Label>
+                    <Form.Label>Про вас</Form.Label>
                     <Form.Control
                       as="textarea"
                       rows={3}
@@ -334,7 +372,7 @@ const Profile: React.FC = () => {
                       value={formData.bio}
                       onChange={handleInputChange}
                       disabled={loading}
-                      placeholder="Tell us about yourself"
+                      placeholder="Розкажіть нам про себе"
                     />
                   </Form.Group>
 
@@ -344,16 +382,22 @@ const Profile: React.FC = () => {
                     className="w-100 mb-2"
                     disabled={loading}
                   >
-                    {loading ? "Saving..." : "Save Changes"}
+                    <i className="bi bi-check-circle me-2"></i>
+                    {loading ? "Збереження..." : "Зберегти зміни"}
                   </Button>
 
                   <Button
                     variant="secondary"
                     className="w-100"
-                    onClick={() => setIsEditing(false)}
+                    onClick={() => {
+                      setIsEditing(false);
+                      setAvatarFile(null);
+                      setAvatarPreview(profile?.avatar_url || null);
+                    }}
                     disabled={loading}
                   >
-                    Cancel
+                    <i className="bi bi-x-circle me-2"></i>
+                    Скасувати
                   </Button>
                 </Form>
               )}
@@ -364,7 +408,7 @@ const Profile: React.FC = () => {
 
       <Modal show={showStats} onHide={() => setShowStats(false)} size="lg">
         <Modal.Header closeButton>
-          <Modal.Title>Your Walking Statistics</Modal.Title>
+          <Modal.Title>Статистика ваших прогулянок</Modal.Title>
         </Modal.Header>
         <Modal.Body>
           {statsLoading ? (
@@ -373,18 +417,19 @@ const Profile: React.FC = () => {
             </div>
           ) : statistics.length === 0 ? (
             <p className="text-muted text-center">
-              No walking records yet. Start walking to track your progress!
+              Записів про прогулянки ще немає. Починайте гуляти, щоб
+              відстежувати прогрес!
             </p>
           ) : (
             <div className="table-responsive">
               <table className="table">
                 <thead>
                   <tr>
-                    <th>Date</th>
-                    <th>Distance (km)</th>
-                    <th>Time (min)</th>
-                    <th>Pace (km/h)</th>
-                    <th>Mood</th>
+                    <th>Дата</th>
+                    <th>Відстань (км)</th>
+                    <th>Час (хв)</th>
+                    <th>Темп (км/год)</th>
+                    <th>Настрій</th>
                   </tr>
                 </thead>
                 <tbody>

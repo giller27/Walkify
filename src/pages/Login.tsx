@@ -40,6 +40,11 @@ const Login: React.FC = () => {
     }));
   };
 
+  // Функція для валідації повного імені - дозволяє будь-які символи
+  const validateFullName = (name: string): string => {
+    return name.trim();
+  };
+
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -61,12 +66,17 @@ const Login: React.FC = () => {
     setLoading(true);
 
     try {
-      await supabaseModules.signUp(formData.email, formData.password);
-      // Створити профіль користувача
-      const user = await supabaseModules.getCurrentUser();
-      if (user) {
-        await supabaseModules.createUserProfile(user.id, formData.full_name);
+      // Перевірити повне ім'я
+      const cleanedFullName = validateFullName(formData.full_name);
+      if (!cleanedFullName) {
+        throw new Error("Повне ім'я не повинне бути порожнім");
       }
+
+      await supabaseModules.signUp(
+        formData.email,
+        formData.password,
+        cleanedFullName
+      );
       navigate("/");
     } catch (err) {
       setError((err as Error).message || "Помилка при реєстрації");
@@ -80,11 +90,27 @@ const Login: React.FC = () => {
     setLoading(true);
 
     try {
+      // signInWithGoogle redirects to callback, so this is for OAuth flow
+      // The actual user creation happens in the callback
       await supabaseModules.signInWithGoogle();
-      navigate("/");
-    } catch (err) {
-      setError((err as Error).message || "Помилка при вході через Google");
-    } finally {
+      // Note: redirect happens, so this line might not execute
+      // Auth state will be updated via AuthContext listener
+    } catch (err: any) {
+      // Обробка конкретних помилок Google OAuth
+      if (err?.error_code === "validation_failed") {
+        setError(
+          "Google OAuth не налаштований. Будь ласка використайте Email/Password"
+        );
+      } else if (
+        err?.code === 400 ||
+        err?.error_code === "unsupported_provider"
+      ) {
+        setError(
+          "Google OAuth не увімкнений. Будь ласка спробуйте Email/Password"
+        );
+      } else {
+        setError((err as Error).message || "Помилка при вході через Google");
+      }
       setLoading(false);
     }
   };
@@ -107,13 +133,13 @@ const Login: React.FC = () => {
               >
                 {isSignUp && (
                   <Form.Group className="mb-3">
-                    <Form.Label>Ім'я</Form.Label>
+                    <Form.Label>Повне ім'я</Form.Label>
                     <Form.Control
                       type="text"
                       name="full_name"
                       value={formData.full_name}
                       onChange={handleInputChange}
-                      placeholder="Введіть ваше ім'я"
+                      placeholder="Ваше повне ім'я"
                       disabled={loading}
                     />
                   </Form.Group>
@@ -164,7 +190,8 @@ const Login: React.FC = () => {
                   disabled={loading}
                   className="d-flex align-items-center justify-content-center"
                 >
-                  <i className="bi bi-google me-2"></i>
+                  {/* Google логотип RGB */}
+                  <i className="bi bi-google pe-2"></i>
                   Увійти через Google
                 </Button>
               </div>

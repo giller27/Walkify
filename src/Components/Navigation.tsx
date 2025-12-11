@@ -7,6 +7,7 @@ import {
   Form,
   ButtonGroup,
   Offcanvas,
+  Dropdown,
 } from "react-bootstrap";
 import logo from "../assets/images/icon.png";
 import User from "../assets/images/user.png";
@@ -15,8 +16,19 @@ import Favorites from "../pages/Favorites";
 import Profile from "../pages/Profile";
 import Statistic from "../pages/Statistic";
 import Login from "../pages/Login";
-import { BrowserRouter as Router, Route, Routes } from "react-router-dom";
+import ViewUserProfile from "../pages/ViewUserProfile";
+import AuthCallback from "../pages/AuthCallback";
+import {
+  BrowserRouter as Router,
+  Route,
+  Routes,
+  useNavigate,
+} from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import {
+  searchUsers,
+  UserProfile as UserProfileType,
+} from "../services/supabaseService";
 
 interface GoogleUser {
   name: string;
@@ -24,10 +36,14 @@ interface GoogleUser {
   email: string;
 }
 
-function Navigation() {
+function NavigationContent() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const { user } = useAuth();
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<UserProfileType[]>([]);
+  const [showSearchResults, setShowSearchResults] = useState(false);
+  const { user, profile } = useAuth();
   const [userInfo, setUserInfo] = useState<GoogleUser | null>(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
     const storedUser = localStorage.getItem("userInfo");
@@ -35,6 +51,31 @@ function Navigation() {
       setUserInfo(JSON.parse(storedUser));
     }
   }, []);
+
+  const handleSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!searchQuery.trim()) {
+      setSearchResults([]);
+      return;
+    }
+
+    try {
+      const results = await searchUsers(searchQuery);
+      setSearchResults(results);
+      setShowSearchResults(true);
+    } catch (err) {
+      console.error("Search error:", err);
+      setSearchResults([]);
+    }
+  };
+
+  const handleSelectUser = (userId: string) => {
+    setSearchQuery("");
+    setSearchResults([]);
+    setShowSearchResults(false);
+    setIsMenuOpen(false);
+    navigate(`/user/${userId}`);
+  };
 
   return (
     <>
@@ -83,7 +124,7 @@ function Navigation() {
             <Offcanvas.Body className="bg-success text-bg-dark p-0">
               <div className="d-flex m-2 mx-4 align-items-center">
                 <img
-                  src={userInfo?.picture || User}
+                  src={profile?.avatar_url || userInfo?.picture || User}
                   height="40"
                   width="40"
                   className="d-inline-block text-center mx-1 me-2 rounded-circle"
@@ -91,11 +132,19 @@ function Navigation() {
                 />
                 <div>
                   <h1 className="fs-4 m-0">
-                    {user ? userInfo?.name || user?.email || "User" : "User"}
+                    {user
+                      ? profile?.full_name ||
+                        userInfo?.name ||
+                        user?.email?.split("@")[0] ||
+                        "User"
+                      : "User"}
                   </h1>
                   {user ? (
-                    <Nav.Link href="/prof" className="m-0">
-                      User-Profile
+                    <Nav.Link
+                      href={`/user/${profile?.id || user?.id}`}
+                      className="m-0"
+                    >
+                      {user?.email}
                     </Nav.Link>
                   ) : (
                     <Nav.Link href="/login" className="m-0">
@@ -106,14 +155,37 @@ function Navigation() {
                 </div>
               </div>
 
-              <Form className="hstack g-2 py-3 px-4">
+              <Form className="hstack g-2 py-3 px-4" onSubmit={handleSearch}>
                 <input
                   type="text"
-                  placeholder="Search"
+                  placeholder="Search users..."
                   className="form-control me-2"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
                 />
-                <Button>Search</Button>
+                <Button type="submit" variant="light">
+                  Search
+                </Button>
               </Form>
+
+              {showSearchResults && searchResults.length > 0 && (
+                <div className="px-4 py-2 bg-light rounded">
+                  <p className="text-dark mb-2">Результати пошуку:</p>
+                  {searchResults.map((result) => (
+                    <button
+                      key={result.id}
+                      className="d-block w-100 text-start p-2 border rounded mb-2 bg-white"
+                      style={{ cursor: "pointer", textDecoration: "none" }}
+                      onClick={() => handleSelectUser(result.id)}
+                    >
+                      <div className="fw-bold text-dark">
+                        {result.full_name || "Unknown User"}
+                      </div>
+                      <small className="text-muted">{result.email}</small>
+                    </button>
+                  ))}
+                </div>
+              )}
 
               <Nav className="px-4 mt-2">
                 <hr></hr>
@@ -125,7 +197,9 @@ function Navigation() {
                 <hr></hr>
                 {user && (
                   <>
-                    <Nav.Link href="/prof">Profile</Nav.Link>
+                    <Nav.Link href={`/user/${profile?.id || user?.id}`}>
+                      Profile
+                    </Nav.Link>
                     <hr></hr>
                   </>
                 )}
@@ -159,23 +233,47 @@ function Navigation() {
           <br />
           Statistic
         </Button>
-        <Button className="btn btn-success text-center rounded-0" href="/prof">
-          <i className="bi bi-person"></i>
-          <br />
-          Profile
-        </Button>
+        {user && (
+          <Button
+            className="btn btn-success text-center rounded-0"
+            href={`/user/${profile?.id || user?.id}`}
+          >
+            <i className="bi bi-person"></i>
+            <br />
+            Profile
+          </Button>
+        )}
+        {!user && (
+          <Button
+            className="btn btn-success text-center rounded-0"
+            href="/login"
+          >
+            <i className="bi bi-box-arrow-in-right"></i>
+            <br />
+            Login
+          </Button>
+        )}
       </ButtonGroup>
-      <Router>
-        <Routes>
-          <Route path="/" Component={Home} />
-          <Route path="/home" Component={Home} />
-          <Route path="/favs" Component={Favorites} />
-          <Route path="/prof" Component={Profile} />
-          <Route path="/stat" Component={Statistic} />
-          <Route path="/login" Component={Login} />
-        </Routes>
-      </Router>
     </>
   );
 }
+
+function Navigation() {
+  return (
+    <Router>
+      <NavigationContent />
+      <Routes>
+        <Route path="/" Component={Home} />
+        <Route path="/home" Component={Home} />
+        <Route path="/profile" Component={Profile} />
+        <Route path="/favs" Component={Favorites} />
+        <Route path="/stat" Component={Statistic} />
+        <Route path="/login" Component={Login} />
+        <Route path="/user/:id" Component={ViewUserProfile} />
+        <Route path="/auth/callback" Component={AuthCallback} />
+      </Routes>
+    </Router>
+  );
+}
+
 export default Navigation;

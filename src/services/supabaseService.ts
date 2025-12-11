@@ -57,7 +57,7 @@ export interface SavedRoute {
 
 export interface UserProfile {
   id: string;
-  username?: string;
+  email?: string;
   full_name?: string;
   avatar_url?: string;
   bio?: string;
@@ -106,7 +106,7 @@ export async function signUp(email: string, password: string, fullName?: string)
   
   // Створити профіль користувача
   if (data.user) {
-    await createUserProfile(data.user.id, fullName || email);
+    await createUserProfile(data.user.id, email, fullName);
   }
 
   return data;
@@ -137,6 +137,9 @@ export async function signInWithGoogle() {
   });
 
   if (error) throw error;
+  
+  // signInWithOAuth повертає URL для redirect, не user об'єкт
+  // Користувач буде отриманий в auth callback сторінці
   return data;
 }
 
@@ -178,13 +181,47 @@ export function onAuthStateChange(callback: (user: any) => void) {
 // ============ ПРОФІЛЬ КОРИСТУВАЧА ============
 
 /**
+ * Перевірити чи нікнейм унікальний
+ */
+export async function isEmailUnique(email: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('email', email.toLowerCase())
+    .single();
+
+  // Якщо помилка - нікнейм унікальний
+  if (error && error.code === 'PGRST116') {
+    return true;
+  }
+  
+  // Якщо дані знайдені - нікнейм не унікальний
+  if (data) {
+    return false;
+  }
+  
+  // Інші помилки
+  if (error) throw error;
+  return true;
+}
+
+/**
  * Створити профіль користувача
  */
-export async function createUserProfile(userId: string, fullName?: string) {
+export async function createUserProfile(userId: string, email?: string, fullName?: string) {
+  // Перевірити унікальність нікнейму
+  if (email) {
+    const isUnique = await isEmailUnique(email);
+    if (!isUnique) {
+      throw new Error(`Почта "${email}" вже використовується. Будь ласка, виберіть іншу почту.`);
+    }
+  }
+
   const { data, error } = await supabase
     .from('profiles')
     .insert({
       id: userId,
+      email: email?.toLowerCase(),
       full_name: fullName || 'User',
       total_walks: 0,
       total_distance: 0,
@@ -199,13 +236,33 @@ export async function createUserProfile(userId: string, fullName?: string) {
 }
 
 /**
- * Отримати профіль користувача
+ * Отримати профіль користувача за ID
  */
 export async function getUserProfile(userId: string) {
   const { data, error } = await supabase
     .from('profiles')
     .select('*')
     .eq('id', userId)
+    .single();
+
+  if (error) {
+    // Якщо профіль не існує, повертаємо null замість помилки
+    if (error.code === 'PGRST116' || error.message?.includes('No rows found')) {
+      return null;
+    }
+    throw error;
+  }
+  return data as UserProfile;
+}
+
+/**
+ * Отримати профіль користувача за нікнейму
+ */
+export async function getUserProfileByUsername(email: string) {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('email', email.toLowerCase())
     .single();
 
   if (error) {
@@ -258,6 +315,30 @@ export async function uploadAvatar(userId: string, file: File) {
   await updateUserProfile(userId, { avatar_url: publicUrl });
 
   return publicUrl;
+}
+
+/**
+ * Пошук користувачів за іменем або email
+ */
+export async function searchUsers(query: string): Promise<UserProfile[]> {
+  if (!query || query.trim().length === 0) {
+    return [];
+  }
+
+  const searchTerm = `%${query.toLowerCase()}%`;
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('*')
+    .or(`full_name.ilike.${searchTerm},email.ilike.${searchTerm}`)
+    .limit(10);
+
+  if (error) {
+    console.error('Error searching users:', error);
+    return [];
+  }
+
+  return (data || []) as UserProfile[];
 }
 
 // ============ МАРШРУТИ ============
