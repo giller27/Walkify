@@ -27,6 +27,7 @@ import {
 import { useAuth } from "../context/AuthContext";
 import {
   searchUsers,
+  signOut,
   UserProfile as UserProfileType,
 } from "../services/supabaseService";
 
@@ -201,6 +202,17 @@ function NavigationContent() {
                       Profile
                     </Nav.Link>
                     <hr></hr>
+                    <Nav.Link
+                      href="/login"
+                      className="w-100"
+                      onClick={async () => {
+                        await signOut();
+                        navigate("/login");
+                      }}
+                    >
+                      <i className="bi bi-box-arrow-right me-2"></i>
+                      Вихід
+                    </Nav.Link>
                   </>
                 )}
                 {!user && (
