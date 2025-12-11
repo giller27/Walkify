@@ -23,9 +23,7 @@ const createUserLocationIcon = (heading: number) => {
         <div style="position: absolute; width: 60px; height: 60px; border-radius: 50%; background: rgba(25, 135, 84, 0.15); animation: pulse 2.5s infinite; box-shadow: 0 0 10px rgba(25, 135, 84, 0.3);"></div>
         <div style="position: absolute; width: 45px; height: 45px; border-radius: 50%; border: 2px solid rgba(25, 135, 84, 0.4); animation: pulse 2.5s infinite; animation-delay: 0.3s;"></div>
         <div style="position: relative; width: 35px; height: 35px; border-radius: 50%; background: linear-gradient(135deg, #198754, #20c997); border: 3px solid white; box-shadow: 0 3px 12px rgba(0, 0, 0, 0.5), inset 0 1px 3px rgba(255,255,255,0.3); z-index: 2; display: flex; align-items: center; justify-content: center;">
-          <div style="position: absolute; width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 10px solid white; filter: drop-shadow(0 1px 1px rgba(0,0,0,0.4)); transform: rotate(${
-            heading + 180
-          }deg) translateY(-5px); transition: transform 0.3s ease;"></div>
+          <div style="position: absolute; width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 10px solid white; filter: drop-shadow(0 1px 1px rgba(0,0,0,0.4)); transform: rotate(${-heading}deg) translateY(-5px); transition: transform 0.3s ease;"></div>
         </div>
         <style>
           @keyframes pulse {
