@@ -23,7 +23,7 @@ import user from "../assets/images/user.png";
 const Profile: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { user, profile, signOut } = useAuth();
+  const { user: currentUser, profile, signOut } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -83,14 +83,14 @@ const Profile: React.FC = () => {
     setLoading(true);
 
     try {
-      if (!user) throw new Error("User not authenticated");
+      if (!currentUser) throw new Error("User not authenticated");
 
       let avatarUrl = profile?.avatar_url;
       if (avatarFile) {
-        avatarUrl = await uploadAvatar(user.id, avatarFile);
+        avatarUrl = await uploadAvatar(currentUser.id, avatarFile);
       }
 
-      await updateUserProfile(user.id, {
+      await updateUserProfile(currentUser.id, {
         full_name: formData.full_name,
         email: formData.email,
         bio: formData.bio,
@@ -109,10 +109,10 @@ const Profile: React.FC = () => {
   };
 
   const handleLoadStatistics = async () => {
-    if (!user) return;
+    if (!currentUser) return;
     setStatsLoading(true);
     try {
-      const stats = await getUserWalkStatistics(user.id);
+      const stats = await getUserWalkStatistics(currentUser.id);
       setStatistics(stats);
     } catch (err) {
       setError((err as Error).message);
@@ -148,7 +148,7 @@ const Profile: React.FC = () => {
     }
   };
 
-  if (!user) {
+  if (!currentUser) {
     return (
       <Container className="py-5 text-center">
         <Row className="justify-content-center">
@@ -233,7 +233,7 @@ const Profile: React.FC = () => {
                 className="mb-1"
                 style={{ fontSize: "24px", fontWeight: "bold", color: "black" }}
               >
-                {profile?.full_name || user?.email || "Користувач"}
+                {profile?.full_name || currentUser?.email || "Користувач"}
               </h4>
               <p
                 style={{
@@ -242,7 +242,7 @@ const Profile: React.FC = () => {
                   marginBottom: "24px",
                 }}
               >
-                {user?.email}
+                {currentUser?.email}
               </p>
 
               {!isEditing ? (
