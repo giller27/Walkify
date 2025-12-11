@@ -19,88 +19,24 @@ const createUserLocationIcon = (heading: number) => {
   return L.divIcon({
     className: "user-location-icon",
     html: `
-      <div style="
-        position: relative;
-        width: 50px;
-        height: 50px;
-      ">
-        <!-- Outer pulse ring -->
-        <div style="
-          position: absolute;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -50%);
-          width: 50px;
-          height: 50px;
-          border-radius: 50%;
-          background: rgba(25, 135, 84, 0.2);
-          animation: pulse 2s infinite;
-        "></div>
-        <!-- Main circle with play triangle -->
-        <div style="
-          position: absolute;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -50%);
-          width: 40px;
-          height: 40px;
-          border-radius: 50%;
-          background: #198754;
-          border: 4px solid white;
-          box-shadow: 0 3px 10px rgba(0,0,0,0.4);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        ">
-          <!-- Large play triangle pointing in direction -->
-          <div style="
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%) rotate(${heading}deg);
-            width: 0;
-            height: 0;
-            border-left: 14px solid white;
-            border-top: 9px solid transparent;
-            border-bottom: 9px solid transparent;
-            margin-left: 3px;
-            filter: drop-shadow(0 1px 2px rgba(0,0,0,0.3));
-          "></div>
-          <!-- Additional arrow line for better visibility -->
-          <div style="
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%) rotate(${heading}deg);
-            width: 2px;
-            height: 12px;
-            background: white;
-            margin-left: 8px;
-            margin-top: -6px;
-            border-radius: 1px;
-            filter: drop-shadow(0 1px 2px rgba(0,0,0,0.3));
-          "></div>
+      <div style="position: relative; width: 60px; height: 60px; display: flex; align-items: center; justify-content: center;">
+        <div style="position: absolute; width: 60px; height: 60px; border-radius: 50%; background: rgba(25, 135, 84, 0.15); animation: pulse 2.5s infinite; box-shadow: 0 0 10px rgba(25, 135, 84, 0.3);"></div>
+        <div style="position: absolute; width: 45px; height: 45px; border-radius: 50%; border: 2px solid rgba(25, 135, 84, 0.4); animation: pulse 2.5s infinite; animation-delay: 0.3s;"></div>
+        <div style="position: relative; width: 35px; height: 35px; border-radius: 50%; background: linear-gradient(135deg, #198754, #20c997); border: 3px solid white; box-shadow: 0 3px 12px rgba(0, 0, 0, 0.5), inset 0 1px 3px rgba(255,255,255,0.3); z-index: 2; display: flex; align-items: center; justify-content: center;">
+          <div style="position: absolute; width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 10px solid white; filter: drop-shadow(0 1px 1px rgba(0,0,0,0.4)); transform: rotate(${heading}deg) translateY(-5px); transition: transform 0.3s ease;"></div>
         </div>
         <style>
           @keyframes pulse {
-            0% {
-              transform: translate(-50%, -50%) scale(1);
-              opacity: 0.7;
-            }
-            50% {
-              transform: translate(-50%, -50%) scale(1.5);
-              opacity: 0.3;
-            }
-            100% {
-              transform: translate(-50%, -50%) scale(2);
-              opacity: 0;
-            }
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.2); opacity: 0.5; }
+            100% { transform: scale(1.4); opacity: 0; }
           }
         </style>
       </div>
     `,
-    iconSize: [50, 50],
-    iconAnchor: [25, 25],
+    iconSize: [60, 60],
+    iconAnchor: [30, 30],
+    popupAnchor: [0, -30],
   });
 };
 
@@ -428,6 +364,7 @@ const GeolocationControl = ({
 }) => {
   const map = useMap();
   const [isActive, setIsActive] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const watchIdRef = useRef<number | null>(null);
   const orientationHandlerRef = useRef<
     ((event: DeviceOrientationEvent) => void) | null
@@ -435,16 +372,27 @@ const GeolocationControl = ({
 
   const startGeolocation = () => {
     if (!navigator.geolocation) {
-      alert("Геолокація не підтримується вашим браузером");
+      setError("Геолокація не підтримується вашим браузером");
+      setTimeout(() => setError(null), 5000);
       return;
     }
 
     setIsActive(true);
+    setError(null);
 
     // Watch position
     watchIdRef.current = navigator.geolocation.watchPosition(
       (position) => {
         const { latitude, longitude, heading } = position.coords;
+
+        // Лог для дебагу
+        console.log("Geolocation updated:", {
+          lat: latitude,
+          lng: longitude,
+          heading: heading,
+        });
+
+        // Передати координати через callback
         onLocationUpdate(latitude, longitude);
 
         // Use heading from geolocation if available
@@ -454,11 +402,23 @@ const GeolocationControl = ({
 
         // Center map on user location
         map.setView([latitude, longitude], map.getZoom());
+        setError(null);
       },
       (error) => {
         console.error("Geolocation error:", error);
-        alert("Помилка отримання геолокації: " + error.message);
+        let errorMessage = "Помилка отримання геолокації";
+
+        if (error.code === error.PERMISSION_DENIED) {
+          errorMessage = "Геолокація заборонена в налаштуваннях браузера";
+        } else if (error.code === error.POSITION_UNAVAILABLE) {
+          errorMessage = "Позиція недоступна";
+        } else if (error.code === error.TIMEOUT) {
+          errorMessage = "Час очікування геолокації закінчився";
+        }
+
+        setError(errorMessage);
         setIsActive(false);
+        setTimeout(() => setError(null), 5000);
       },
       {
         enableHighAccuracy: true,
@@ -530,36 +490,57 @@ const GeolocationControl = ({
   }, [onRequestGeolocationRef]);
 
   return (
-    <button
-      className={`btn ${
-        isActive ? "btn-success" : "btn-success"
-      } position-absolute rounded-circle`}
-      style={{
-        top: "10px",
-        right: "10px",
-        zIndex: 1000,
-        width: "45px",
-        height: "45px",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        boxShadow: "0 2px 5px rgba(0,0,0,0.3)",
-      }}
-      onClick={(e) => {
-        e.stopPropagation(); // Prevent map click event
-        if (isActive) {
-          stopGeolocation();
-        } else {
-          startGeolocation();
+    <>
+      {error && (
+        <div
+          className="position-absolute text-danger"
+          style={{
+            top: "70px",
+            right: "10px",
+            zIndex: 1000,
+            fontSize: "12px",
+            backgroundColor: "rgba(255, 255, 255, 0.9)",
+            padding: "8px 12px",
+            borderRadius: "4px",
+            boxShadow: "0 2px 5px rgba(0,0,0,0.2)",
+          }}
+        >
+          {error}
+        </div>
+      )}
+      <button
+        className={`btn ${
+          isActive ? "btn-success" : "btn-success"
+        } position-absolute rounded-circle`}
+        style={{
+          top: "10px",
+          right: "10px",
+          zIndex: 1000,
+          width: "45px",
+          height: "45px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          boxShadow: "0 2px 5px rgba(0,0,0,0.3)",
+        }}
+        onClick={(e) => {
+          e.stopPropagation(); // Prevent map click event
+          if (isActive) {
+            stopGeolocation();
+          } else {
+            startGeolocation();
+          }
+        }}
+        title={
+          isActive ? "Зупинити геолокацію" : "Показати моє місцезнаходження"
         }
-      }}
-      title={isActive ? "Зупинити геолокацію" : "Показати моє місцезнаходження"}
-    >
-      <i
-        className={`bi bi-${isActive ? "geo-alt-fill" : "geo-alt"}`}
-        style={{ fontSize: "20px" }}
-      ></i>
-    </button>
+      >
+        <i
+          className={`bi bi-${isActive ? "crosshair2" : "crosshair"}`}
+          style={{ fontSize: "18px" }}
+        ></i>
+      </button>
+    </>
   );
 };
 
