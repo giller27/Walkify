@@ -185,8 +185,11 @@ function Statistic() {
       ) : (
         <>
           {/* Основні метрики */}
-          <Row className="g-3 mb-4">
-            <Col xs={12} sm={6} md={3}>
+          <Row
+            className="g-3 mb-4"
+            style={{ display: "flex", flexWrap: "wrap" }}
+          >
+            <Col xs={12} sm={6} style={{ flex: "0 0 20%", maxWidth: "20%" }}>
               <Card className="h-100 border-success">
                 <Card.Body className="text-center">
                   <div className="display-4 text-success mb-2">
@@ -200,7 +203,7 @@ function Statistic() {
               </Card>
             </Col>
 
-            <Col xs={12} sm={6} md={3}>
+            <Col xs={12} sm={6} style={{ flex: "0 0 20%", maxWidth: "20%" }}>
               <Card className="h-100 border-success">
                 <Card.Body className="text-center">
                   <div className="display-4 text-success mb-2">
@@ -214,21 +217,7 @@ function Statistic() {
               </Card>
             </Col>
 
-            <Col xs={12} sm={6} md={3}>
-              <Card className="h-100 border-success">
-                <Card.Body className="text-center">
-                  <div className="display-4 text-success mb-2">
-                    <i className="bi bi-speedometer2"></i>
-                  </div>
-                  <Card.Title className="text-muted small">
-                    Середня відстань
-                  </Card.Title>
-                  <h2 className="mb-0">{averageDistance.toFixed(1)} км</h2>
-                </Card.Body>
-              </Card>
-            </Col>
-
-            <Col xs={12} sm={6} md={3}>
+            <Col xs={12} sm={6} style={{ flex: "0 0 20%", maxWidth: "20%" }}>
               <Card className="h-100 border-success">
                 <Card.Body className="text-center">
                   <div className="display-4 text-success mb-2">
@@ -246,14 +235,30 @@ function Statistic() {
               </Card>
             </Col>
 
-            <Col xs={12} sm={6} md={3}>
+            <Col xs={12} sm={6} style={{ flex: "0 0 20%", maxWidth: "20%" }}>
+              <Card className="h-100 border-success">
+                <Card.Body className="text-center">
+                  <div className="display-4 text-success mb-2">
+                    <i className="bi bi-speedometer2"></i>
+                  </div>
+                  <Card.Title className="text-muted small">
+                    Середня швидкість
+                  </Card.Title>
+                  <h2 className="mb-0">
+                    {(60 / averagePace).toFixed(2)} км/год
+                  </h2>
+                </Card.Body>
+              </Card>
+            </Col>
+
+            <Col xs={12} sm={6} style={{ flex: "0 0 20%", maxWidth: "20%" }}>
               <Card className="h-100 border-success">
                 <Card.Body className="text-center">
                   <div className="display-4 text-success mb-2">
                     <i className="bi bi-hourglass"></i>
                   </div>
                   <Card.Title className="text-muted small">
-                    Середня тривалість
+                    Тривалість прогулянок
                   </Card.Title>
                   <h2 className="mb-0">{averagePace.toFixed(0)} хв/км</h2>
                 </Card.Body>

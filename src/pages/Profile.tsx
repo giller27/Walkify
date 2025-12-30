@@ -55,6 +55,13 @@ const Profile: React.FC = () => {
     }
   }, [profile]);
 
+  // Завантажити статистику при відкритті профілю
+  useEffect(() => {
+    if (currentUser) {
+      handleLoadStatistics();
+    }
+  }, [currentUser]);
+
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
