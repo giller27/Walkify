@@ -184,12 +184,23 @@ function Statistic() {
         </Alert>
       ) : (
         <>
+          <style>{`
+            @media (max-width: 991px) {
+              .stat-metric {
+                flex: 0 0 100% !important;
+                max-width: 100% !important;
+              }
+            }
+            @media (min-width: 992px) {
+              .stat-metric {
+                flex: 0 0 20% !important;
+                max-width: 20% !important;
+              }
+            }
+          `}</style>
           {/* Основні метрики */}
-          <Row
-            className="g-3 mb-4"
-            style={{ display: "flex", flexWrap: "wrap" }}
-          >
-            <Col xs={12} sm={6} style={{ flex: "0 0 20%", maxWidth: "20%" }}>
+          <Row className="g-3 mb-4">
+            <Col xs={12} className="stat-metric">
               <Card className="h-100 border-success">
                 <Card.Body className="text-center">
                   <div className="display-4 text-success mb-2">
@@ -203,7 +214,7 @@ function Statistic() {
               </Card>
             </Col>
 
-            <Col xs={12} sm={6} style={{ flex: "0 0 20%", maxWidth: "20%" }}>
+            <Col xs={12} className="stat-metric">
               <Card className="h-100 border-success">
                 <Card.Body className="text-center">
                   <div className="display-4 text-success mb-2">
@@ -217,7 +228,7 @@ function Statistic() {
               </Card>
             </Col>
 
-            <Col xs={12} sm={6} style={{ flex: "0 0 20%", maxWidth: "20%" }}>
+            <Col xs={12} className="stat-metric">
               <Card className="h-100 border-success">
                 <Card.Body className="text-center">
                   <div className="display-4 text-success mb-2">
@@ -235,7 +246,7 @@ function Statistic() {
               </Card>
             </Col>
 
-            <Col xs={12} sm={6} style={{ flex: "0 0 20%", maxWidth: "20%" }}>
+            <Col xs={12} className="stat-metric">
               <Card className="h-100 border-success">
                 <Card.Body className="text-center">
                   <div className="display-4 text-success mb-2">
@@ -251,7 +262,7 @@ function Statistic() {
               </Card>
             </Col>
 
-            <Col xs={12} sm={6} style={{ flex: "0 0 20%", maxWidth: "20%" }}>
+            <Col xs={12} className="stat-metric">
               <Card className="h-100 border-success">
                 <Card.Body className="text-center">
                   <div className="display-4 text-success mb-2">
