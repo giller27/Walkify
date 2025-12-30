@@ -54,6 +54,7 @@ const MapPreview: React.FC<MapPreviewProps> = ({
             type: "LineString",
             coordinates: coordinates,
           },
+          properties: {},
         },
       });
 
