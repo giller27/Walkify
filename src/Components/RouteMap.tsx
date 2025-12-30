@@ -10,201 +10,132 @@ const MAPBOX_TOKEN = "pk.eyJ1IjoiaGFsbGV5cy1jb21ldCIsImEiOiJjbWpzcmc0dzQ0NHZ1M2d
 
 type LatLngTuple = [number, number];
 
-// Geocoding function to convert location name to coordinates
-const geocodeLocation = async (
-  locationName: string
+// ================= Mapbox Geocoding API =================
+/**
+ * Пошук місць через Mapbox Geocoding API
+ * @param query - назва місця або адреса
+ * @param proximity - координати для пошуку поблизу (опціонально)
+ * @returns координати місця [lat, lng] або null
+ */
+const geocodeWithMapbox = async (
+  query: string,
+  proximity?: LatLngTuple
 ): Promise<LatLngTuple | null> => {
   try {
-    const response = await fetch(
-      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
-        locationName
-      )}&limit=1`,
-      {
-        headers: {
-          "User-Agent": "Walkify App",
-        },
-      }
-    );
-    const data = await response.json();
-    if (data && data.length > 0) {
-      return [parseFloat(data[0].lat), parseFloat(data[0].lon)];
-    }
-    return null;
-  } catch (error) {
-    console.error("Geocoding error:", error);
-    return null;
-  }
-};
-
-// Map query types to OSM tags
-const getOSMTags = (query: string): { key: string; value: string }[] => {
-  const queryLower = query.toLowerCase();
-  const tags: { key: string; value: string }[] = [];
-
-  if (queryLower.includes("park") || queryLower.includes("парк")) {
-    tags.push({ key: "leisure", value: "park" });
-    tags.push({ key: "landuse", value: "recreation_ground" });
-  }
-  if (
-    queryLower.includes("cafe") ||
-    queryLower.includes("кафе") ||
-    queryLower.includes("кав")
-  ) {
-    tags.push({ key: "amenity", value: "cafe" });
-  }
-  if (
-    queryLower.includes("shop") ||
-    queryLower.includes("магазин") ||
-    queryLower.includes("supermarket") ||
-    queryLower.includes("супермаркет")
-  ) {
-    tags.push({ key: "shop", value: "supermarket" });
-    tags.push({ key: "amenity", value: "marketplace" });
-  }
-  if (queryLower.includes("restaurant") || queryLower.includes("ресторан")) {
-    tags.push({ key: "amenity", value: "restaurant" });
-  }
-  if (queryLower.includes("museum") || queryLower.includes("музей")) {
-    tags.push({ key: "tourism", value: "museum" });
-  }
-  if (
-    queryLower.includes("church") ||
-    queryLower.includes("церква") ||
-    queryLower.includes("храм")
-  ) {
-    tags.push({ key: "amenity", value: "place_of_worship" });
-  }
-
-  return tags;
-};
-
-// Search for POI using Overpass API (more accurate than Nominatim)
-const searchNearbyPOIOverpass = async (
-  center: LatLngTuple,
-  tags: { key: string; value: string }[],
-  radius: number = 2000
-): Promise<LatLngTuple[]> => {
-  if (tags.length === 0) return [];
-
-  try {
-    const [lat, lng] = center;
-    // Convert radius from meters to degrees (approximate)
-    const radiusDeg = radius / 111000;
-
-    // Build Overpass QL query
-    const tagFilters = tags
-      .map((tag) => `["${tag.key}"="${tag.value}"]`)
-      .join("");
-    const query = `
-      [out:json][timeout:10];
-      (
-        node${tagFilters}(around:${radius},${lat},${lng});
-        way${tagFilters}(around:${radius},${lat},${lng});
-        relation${tagFilters}(around:${radius},${lat},${lng});
-      );
-      out center;
-    `;
-
-    const response = await fetch("https://overpass-api.de/api/interpreter", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: `data=${encodeURIComponent(query)}`,
+    const params = new URLSearchParams({
+      access_token: MAPBOX_TOKEN,
+      limit: "1",
+      types: "poi,address,place",
     });
 
+    if (proximity) {
+      // Mapbox очікує [lng, lat] для proximity
+      params.append("proximity", `${proximity[1]},${proximity[0]}`);
+    }
+
+    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?${params.toString()}`;
+    const response = await fetch(url);
+
     if (!response.ok) {
-      throw new Error(`Overpass API error: ${response.status}`);
+      console.error(`Mapbox Geocoding error: ${response.status}`);
+      return null;
     }
 
     const data = await response.json();
-    const results: LatLngTuple[] = [];
-
-    if (data.elements) {
-      for (const element of data.elements) {
-        if (element.type === "node") {
-          results.push([element.lat, element.lon]);
-        } else if (element.center) {
-          results.push([element.center.lat, element.center.lon]);
-        } else if (element.lat && element.lon) {
-          results.push([element.lat, element.lon]);
-        }
-      }
+    if (data.features && data.features.length > 0) {
+      const [lng, lat] = data.features[0].center;
+      return [lat, lng];
     }
 
-    return results;
+    return null;
   } catch (error) {
-    console.error("Overpass API error:", error);
-    return [];
+    console.error("Mapbox Geocoding error:", error);
+    return null;
   }
 };
 
-// Search for POI (Points of Interest) near user location
-const searchNearbyPOI = async (
+/**
+ * Пошук POI (Points of Interest) поблизу через Mapbox Geocoding API
+ * @param center - центр пошуку [lat, lng]
+ * @param category - категорія POI (cafe, park, shop, restaurant, museum, etc.)
+ * @param radius - радіус пошуку в метрах
+ * @returns масив координат знайдених місць
+ */
+const searchPOIWithMapbox = async (
   center: LatLngTuple,
-  query: string,
+  category: string,
   radius: number = 2000
 ): Promise<LatLngTuple[]> => {
   try {
     const [lat, lng] = center;
+    
+    // Mapbox категорії POI
+    const categoryMap: Record<string, string> = {
+      cafe: "cafe",
+      кафе: "cafe",
+      coffee: "cafe",
+      park: "park",
+      парк: "park",
+      shop: "shop",
+      магазин: "shop",
+      supermarket: "shop",
+      супермаркет: "shop",
+      restaurant: "restaurant",
+      ресторан: "restaurant",
+      museum: "museum",
+      музей: "museum",
+      church: "place_of_worship",
+      церква: "place_of_worship",
+      храм: "place_of_worship",
+    };
 
-    // First try Overpass API (more accurate for POI)
-    const osmTags = getOSMTags(query);
-    if (osmTags.length > 0) {
-      const overpassResults = await searchNearbyPOIOverpass(
-        center,
-        osmTags,
-        radius
-      );
-      if (overpassResults.length > 0) {
-        return overpassResults.slice(0, 10); // Limit to 10 results
-      }
+    const mapboxCategory = categoryMap[category.toLowerCase()] || category;
+
+    const params = new URLSearchParams({
+      access_token: MAPBOX_TOKEN,
+      limit: "10",
+      proximity: `${lng},${lat}`,
+      types: "poi",
+      radius: radius.toString(),
+    });
+
+    // Пошук за категорією
+    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(mapboxCategory)}.json?${params.toString()}`;
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      console.error(`Mapbox POI search error: ${response.status}`);
+      return [];
     }
 
-    // Fallback to Nominatim if Overpass doesn't return results
-    const searchQueries = [`${query}`, `${query} near ${lat},${lng}`];
-
-    for (const searchQuery of searchQueries) {
-      try {
-        const response = await fetch(
-          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
-            searchQuery
-          )}&lat=${lat}&lon=${lng}&radius=${radius}&limit=10&addressdetails=1`,
-          {
-            headers: {
-              "User-Agent": "Walkify App",
-            },
-          }
-        );
-        const data = await response.json();
-        if (data && data.length > 0) {
-          const results = data.map((item: any) => [
-            parseFloat(item.lat),
-            parseFloat(item.lon),
-          ]);
-          if (results.length > 0) {
-            return results;
-          }
-        }
-      } catch (err) {
-        console.warn("Nominatim search attempt failed:", err);
-      }
+    const data = await response.json();
+    if (data.features && data.features.length > 0) {
+      return data.features.map((feature: any) => {
+        const [lng, lat] = feature.center;
+        return [lat, lng] as LatLngTuple;
+      });
     }
+
     return [];
   } catch (error) {
-    console.error("POI search error:", error);
+    console.error("Mapbox POI search error:", error);
     return [];
   }
 };
 
-// Get route from Mapbox Directions API with enhanced options
+// ================= Mapbox Directions API =================
+/**
+ * Отримати маршрут через Mapbox Directions API
+ * @param coordinates - масив координат [lng, lat] для Mapbox
+ * @param options - опції маршруту
+ */
 const getRouteFromMapbox = async (
   coordinates: number[][],
   options?: {
     alternatives?: boolean;
     steps?: boolean;
     overview?: "full" | "simplified" | "false";
-    maxDistance?: number; // Maximum distance in meters
+    maxDistance?: number;
   }
 ): Promise<GeoJSON.FeatureCollection | null> => {
   try {
@@ -213,26 +144,23 @@ const getRouteFromMapbox = async (
       return null;
     }
 
-    // Mapbox expects [lng, lat] format
     const coordsString = coordinates.map((c) => `${c[0]},${c[1]}`).join(";");
     
-    // Build URL with parameters
     const params = new URLSearchParams({
       geometries: "geojson",
       access_token: MAPBOX_TOKEN,
       steps: options?.steps ? "true" : "false",
       overview: options?.overview || "full",
-      alternatives: options?.alternatives !== false ? "true" : "false", // Enable alternatives by default for better route selection
+      alternatives: options?.alternatives !== false ? "true" : "false",
     });
 
     const url = `https://api.mapbox.com/directions/v5/mapbox/walking/${coordsString}?${params.toString()}`;
-
     const response = await fetch(url);
+
     if (!response.ok) {
       const txt = await response.text();
       let errorMessage = `Mapbox Directions API error: ${response.status}`;
       
-      // Provide user-friendly error messages
       if (response.status === 422) {
         errorMessage = "Неможливо побудувати маршрут між вказаними точками. Спробуйте інші місця.";
       } else if (response.status === 429) {
@@ -251,17 +179,15 @@ const getRouteFromMapbox = async (
       return null;
     }
 
-    // Filter routes by maxDistance if specified
+    // Фільтрація за максимальною відстанню
     let validRoutes = data.routes;
     if (options?.maxDistance) {
       validRoutes = data.routes.filter(
         (route: any) => route.distance <= options.maxDistance!
       );
       
-      // If no routes within distance, try to find the closest one
       if (validRoutes.length === 0 && data.routes.length > 0) {
         console.warn(`No routes within ${options.maxDistance}m, using closest route`);
-        // Find route closest to maxDistance
         validRoutes = [
           data.routes.reduce((closest: any, current: any) => {
             const closestDiff = Math.abs(closest.distance - options.maxDistance!);
@@ -277,24 +203,11 @@ const getRouteFromMapbox = async (
       return null;
     }
 
-    // Select the best route
-    // For walking, prefer shorter distance, but also consider duration
+    // Вибір найкращого маршруту (найкоротший)
     const bestRoute = validRoutes.reduce((best: any, current: any) => {
-      // If maxDistance is specified, prefer routes closer to it (but not exceeding)
-      if (options?.maxDistance) {
-        const bestDiff = Math.abs(best.distance - options.maxDistance);
-        const currentDiff = Math.abs(current.distance - options.maxDistance);
-        // Prefer route closer to target distance, but if both exceed, prefer shorter
-        if (best.distance > options.maxDistance && current.distance > options.maxDistance) {
-          return current.distance < best.distance ? current : best;
-        }
-        return currentDiff < bestDiff ? current : best;
-      }
-      // Otherwise, prefer shorter distance
       return current.distance < best.distance ? current : best;
     }, validRoutes[0]);
 
-    // Return the route as GeoJSON
     return {
       type: "FeatureCollection",
       features: [
@@ -302,8 +215,8 @@ const getRouteFromMapbox = async (
           type: "Feature",
           geometry: bestRoute.geometry,
           properties: {
-            distance: bestRoute.distance, // in meters
-            duration: bestRoute.duration, // in seconds
+            distance: bestRoute.distance,
+            duration: bestRoute.duration,
             distanceKm: (bestRoute.distance / 1000).toFixed(2),
             durationMinutes: Math.round(bestRoute.duration / 60),
           },
@@ -312,9 +225,69 @@ const getRouteFromMapbox = async (
     };
   } catch (error) {
     console.error("Mapbox Directions error:", error);
-    // Return null to allow fallback behavior
     return null;
   }
+};
+
+/**
+ * Оптимізація порядку відвідування точок (найближчий сусід)
+ * @param start - стартова точка [lat, lng]
+ * @param points - масив точок для відвідування [lat, lng][]
+ * @returns оптимізований порядок точок
+ */
+const optimizeRouteOrder = (
+  start: LatLngTuple,
+  points: LatLngTuple[]
+): LatLngTuple[] => {
+  if (points.length === 0) return [];
+  if (points.length === 1) return points;
+
+  const visited = new Set<number>();
+  const optimized: LatLngTuple[] = [];
+  let current = start;
+
+  while (visited.size < points.length) {
+    let closestIdx = -1;
+    let closestDist = Infinity;
+
+    for (let i = 0; i < points.length; i++) {
+      if (visited.has(i)) continue;
+      
+      const dist = calculateDistance(current, points[i]);
+      if (dist < closestDist) {
+        closestDist = dist;
+        closestIdx = i;
+      }
+    }
+
+    if (closestIdx === -1) break;
+
+    optimized.push(points[closestIdx]);
+    visited.add(closestIdx);
+    current = points[closestIdx];
+  }
+
+  return optimized;
+};
+
+/**
+ * Розрахунок відстані між двома точками (Haversine формула)
+ */
+const calculateDistance = (
+  point1: LatLngTuple,
+  point2: LatLngTuple
+): number => {
+  const R = 6371; // Радіус Землі в км
+  const dLat = ((point2[0] - point1[0]) * Math.PI) / 180;
+  const dLon = ((point2[1] - point1[1]) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((point1[0] * Math.PI) / 180) *
+      Math.cos((point2[0] * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
 };
 
 // ================= Geolocation Control Component =================
@@ -346,27 +319,15 @@ const GeolocationControl = ({
     setIsActive(true);
     setError(null);
 
-    // Watch position
     watchIdRef.current = navigator.geolocation.watchPosition(
       (position) => {
         const { latitude, longitude, heading } = position.coords;
-
-        // Лог для дебагу
-        console.log("Geolocation updated:", {
-          lat: latitude,
-          lng: longitude,
-          heading: heading,
-        });
-
-        // Передати координати через callback
         onLocationUpdate(latitude, longitude);
 
-        // Use heading from geolocation if available
         if (heading !== null && heading !== undefined && !isNaN(heading)) {
           onHeadingUpdate(heading);
         }
 
-        // Center map on user location
         if (mapRef.current) {
           mapRef.current.flyTo({
             center: [longitude, latitude],
@@ -398,18 +359,15 @@ const GeolocationControl = ({
       }
     );
 
-    // Watch device orientation for heading (if available)
     if (window.DeviceOrientationEvent) {
       const handleOrientation = (event: DeviceOrientationEvent) => {
         if (event.alpha !== null && event.alpha !== undefined) {
-          // alpha is the compass direction (0-360)
           onHeadingUpdate(event.alpha);
         }
       };
 
       orientationHandlerRef.current = handleOrientation;
 
-      // Request permission for iOS 13+
       if (
         typeof (DeviceOrientationEvent as any).requestPermission === "function"
       ) {
@@ -447,7 +405,6 @@ const GeolocationControl = ({
     setIsActive(false);
   };
 
-  // Expose startGeolocation to parent via ref
   useEffect(() => {
     if (onRequestGeolocationRef) {
       onRequestGeolocationRef.current = startGeolocation;
@@ -495,7 +452,7 @@ const GeolocationControl = ({
           boxShadow: "0 2px 5px rgba(0,0,0,0.3)",
         }}
         onClick={(e) => {
-          e.stopPropagation(); // Prevent map click event
+          e.stopPropagation();
           if (isActive) {
             stopGeolocation();
           } else {
@@ -517,9 +474,9 @@ const GeolocationControl = ({
 
 // ================= Головний компонент карти =================
 export interface WalkPreferences {
-  locations: string[];
-  distanceKm?: number;
-  prompt?: string;
+  locations: string[]; // Обов'язкові місця для відвідування
+  distanceKm?: number; // Бажана відстань (опціонально)
+  prompt?: string; // Загальні побажання (опціонально)
 }
 
 export interface RouteMapRef {
@@ -566,10 +523,9 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>(
     const requestGeolocationRef = useRef<(() => void) | null>(null);
     const geolocationPermissionRef = useRef<boolean>(false);
 
-    // Спробувати отримати геолокацію при завантаженні, якщо дозвіл вже надано
+    // Спробувати отримати геолокацію при завантаженні
     useEffect(() => {
       if (navigator.geolocation && !userLocation) {
-        // Спробувати отримати кешовану позицію (не запитувати дозвіл)
         navigator.geolocation.getCurrentPosition(
           (position) => {
             const { latitude, longitude } = position.coords;
@@ -577,66 +533,16 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>(
             geolocationPermissionRef.current = true;
           },
           () => {
-            // Дозвіл не надано або помилка - це нормально, запитуватимемо пізніше
             geolocationPermissionRef.current = false;
           },
           {
             enableHighAccuracy: false,
             timeout: 5000,
-            maximumAge: 300000, // Використовувати кешовану позицію до 5 хвилин
+            maximumAge: 300000,
           }
         );
       }
     }, [userLocation]);
-
-    // --- Helpers to parse prompt into hints ---
-    const extractLocationsFromPrompt = (prompt?: string): string[] => {
-      if (!prompt) return [];
-      const lower = prompt.toLowerCase();
-      const keywords = [
-        "park",
-        "парк",
-        "cafe",
-        "кафе",
-        "coffee",
-        "кав'ярня",
-        "shop",
-        "магазин",
-        "mall",
-        "трц",
-        "atb",
-        "атб",
-        "silpo",
-        "сільпо",
-        "silpo",
-        "сільпо",
-        "supermarket",
-        "супермаркет",
-      ];
-      const found = keywords.filter((k) => lower.includes(k));
-      return Array.from(new Set(found));
-    };
-
-    const inferDistanceFromPrompt = (
-      prompt?: string,
-      fallbackKm = 3
-    ): number => {
-      if (!prompt) return fallbackKm;
-      const normalized = prompt.toLowerCase().replace(",", ".");
-      const hourMatch = normalized.match(/(\d+(?:\.\d+)?)\s*(год|hour|h)/);
-      const minMatch = normalized.match(/(\d+(?:\.\d+)?)\s*(хв|min)/);
-      if (hourMatch) {
-        const hrs = parseFloat(hourMatch[1]);
-        if (!Number.isNaN(hrs) && hrs > 0)
-          return Math.max(1, Math.min(hrs * 4.5, 50));
-      }
-      if (minMatch) {
-        const mins = parseFloat(minMatch[1]);
-        if (!Number.isNaN(mins) && mins > 0)
-          return Math.max(1, Math.min((mins / 60) * 4.5, 50));
-      }
-      return fallbackKm;
-    };
 
     const clearAll = () => {
       setPoints([]);
@@ -653,7 +559,234 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>(
       setUserHeading(heading);
     };
 
-    // Fetch and draw route when points change
+    // Витягнути відстань з промпту
+    const extractDistanceFromPrompt = (prompt?: string): number | undefined => {
+      if (!prompt) return undefined;
+      const normalized = prompt.toLowerCase().replace(",", ".");
+      const hourMatch = normalized.match(/(\d+(?:\.\d+)?)\s*(год|hour|h)/);
+      const minMatch = normalized.match(/(\d+(?:\.\d+)?)\s*(хв|min)/);
+      if (hourMatch) {
+        const hrs = parseFloat(hourMatch[1]);
+        if (!Number.isNaN(hrs) && hrs > 0) {
+          // Середня швидкість пішохода 4.5 км/год
+          return Math.max(1, Math.min(hrs * 4.5, 50));
+        }
+      }
+      if (minMatch) {
+        const mins = parseFloat(minMatch[1]);
+        if (!Number.isNaN(mins) && mins > 0) {
+          return Math.max(1, Math.min((mins / 60) * 4.5, 50));
+        }
+      }
+      return undefined;
+    };
+
+    // Генерація маршруту з нуля
+    const generateRouteFromPreferences = React.useCallback(
+      async (preferences: WalkPreferences) => {
+        // 1. Отримати геолокацію користувача
+        let currentLocation = userLocation;
+
+        if (!currentLocation) {
+          if (navigator.geolocation) {
+            try {
+              const position = await new Promise<GeolocationPosition>(
+                (resolve, reject) => {
+                  navigator.geolocation.getCurrentPosition(resolve, reject, {
+                    enableHighAccuracy: true,
+                    timeout: 10000,
+                    maximumAge: 300000,
+                  });
+                }
+              );
+              const { latitude, longitude } = position.coords;
+              currentLocation = [latitude, longitude];
+              setUserLocation(currentLocation);
+              geolocationPermissionRef.current = true;
+            } catch (error) {
+              alert("Будь ласка, надайте дозвіл на геолокацію для генерації маршруту");
+              setIsGenerating(false);
+              return;
+            }
+          } else {
+            alert("Геолокація не підтримується вашим браузером");
+            setIsGenerating(false);
+            return;
+          }
+        }
+
+        if (!currentLocation) {
+          setIsGenerating(false);
+          return;
+        }
+
+        setIsGenerating(true);
+
+        try {
+          // 2. Визначити цільову відстань
+          const targetDistanceKm = preferences.distanceKm || 
+            extractDistanceFromPrompt(preferences.prompt) || 
+            3; // За замовчуванням 3 км
+
+          setMaxDistanceMeters(Math.round(targetDistanceKm * 1000 * 1.2)); // +20% буфер
+
+          // 3. Знайти обов'язкові місця для відвідування
+          const requiredLocations: LatLngTuple[] = [];
+          
+          if (preferences.locations && preferences.locations.length > 0) {
+            console.log("Шукаю обов'язкові місця:", preferences.locations);
+            
+            for (const locationQuery of preferences.locations) {
+              // Спочатку спробувати знайти точну адресу/місце
+              let coords = await geocodeWithMapbox(locationQuery, currentLocation);
+              
+              // Якщо не знайдено, спробувати як POI категорію
+              if (!coords) {
+                const poiResults = await searchPOIWithMapbox(
+                  currentLocation,
+                  locationQuery,
+                  targetDistanceKm * 1000
+                );
+                if (poiResults.length > 0) {
+                  coords = poiResults[0]; // Беремо найближчий
+                }
+              }
+
+              if (coords) {
+                requiredLocations.push(coords);
+                console.log(`Знайдено місце "${locationQuery}":`, coords);
+              } else {
+                console.warn(`Не вдалося знайти місце: ${locationQuery}`);
+              }
+            }
+          }
+
+          // 4. Якщо є промпт, але немає обов'язкових місць, спробувати знайти місця з промпту
+          if (requiredLocations.length === 0 && preferences.prompt) {
+            const promptLower = preferences.prompt.toLowerCase();
+            const categories: string[] = [];
+
+            // Витягнути категорії з промпту
+            if (promptLower.includes("парк") || promptLower.includes("park")) {
+              categories.push("park");
+            }
+            if (promptLower.includes("кафе") || promptLower.includes("cafe") || promptLower.includes("кав")) {
+              categories.push("cafe");
+            }
+            if (promptLower.includes("магазин") || promptLower.includes("shop") || promptLower.includes("супермаркет")) {
+              categories.push("shop");
+            }
+            if (promptLower.includes("ресторан") || promptLower.includes("restaurant")) {
+              categories.push("restaurant");
+            }
+            if (promptLower.includes("музей") || promptLower.includes("museum")) {
+              categories.push("museum");
+            }
+
+            // Знайти POI для кожної категорії
+            for (const category of categories) {
+              const poiResults = await searchPOIWithMapbox(
+                currentLocation,
+                category,
+                targetDistanceKm * 1000
+              );
+              if (poiResults.length > 0) {
+                requiredLocations.push(poiResults[0]);
+              }
+            }
+          }
+
+          // 5. Побудувати маршрут
+          let routePoints: LatLngTuple[] = [currentLocation];
+          let finalDistanceKm = 0;
+
+          if (requiredLocations.length > 0) {
+            // Оптимізувати порядок відвідування
+            const optimizedOrder = optimizeRouteOrder(currentLocation, requiredLocations);
+            routePoints = [currentLocation, ...optimizedOrder];
+
+            // Можливо повернутися до старту, якщо відстань дозволяє
+            const returnDistance = calculateDistance(
+              routePoints[routePoints.length - 1],
+              currentLocation
+            );
+            const totalDistance = routePoints.slice(0, -1).reduce((sum, point, idx, arr) => {
+              if (idx === 0) return 0;
+              return sum + calculateDistance(arr[idx - 1], point);
+            }, 0) + returnDistance;
+
+            if (totalDistance <= targetDistanceKm * 1.2) {
+              routePoints.push(currentLocation);
+            }
+          } else {
+            // Якщо немає обов'язкових місць, створити круговий маршрут
+            const radiusKm = targetDistanceKm / (2 * Math.PI);
+            const radiusMeters = radiusKm * 1000;
+            const [lat, lng] = currentLocation;
+            const latOffset = radiusMeters / 111000;
+            const lngOffset = radiusMeters / (111000 * Math.cos((lat * Math.PI) / 180));
+
+            const numPoints = 8;
+            for (let i = 0; i < numPoints; i++) {
+              const angle = (i * 2 * Math.PI) / numPoints;
+              const pointLat = lat + latOffset * Math.cos(angle);
+              const pointLng = lng + lngOffset * Math.sin(angle);
+              routePoints.push([pointLat, pointLng]);
+            }
+            routePoints.push(currentLocation);
+          }
+
+          // Розрахувати фінальну відстань
+          if (routePoints.length > 1) {
+            let totalDistance = 0;
+            for (let i = 0; i < routePoints.length - 1; i++) {
+              totalDistance += calculateDistance(routePoints[i], routePoints[i + 1]);
+            }
+            finalDistanceKm = totalDistance;
+          }
+
+          // 6. Встановити точки та згенерувати маршрут через Mapbox
+          setGeneratedPoints(routePoints);
+          setPoints(routePoints);
+          setClearSignal((s) => s + 1);
+
+          // 7. Оновити підсумок
+          const estimatedTimeMinutes = (finalDistanceKm / 4.5) * 60;
+          
+          if (props.onRouteSummary) {
+            let summaryText = "";
+            if (requiredLocations.length > 0) {
+              summaryText = `Маршрут включає ${requiredLocations.length} обов'язкових місць. `;
+            }
+            summaryText += `Довжина: ${finalDistanceKm.toFixed(1)} км. Орієнтовний час: ${Math.round(estimatedTimeMinutes)} хв.`;
+            props.onRouteSummary(summaryText);
+          }
+
+          // 8. Callback для статистики
+          if (props.onRouteGenerated) {
+            const routeData = {
+              distanceKm: finalDistanceKm,
+              locations: preferences.locations,
+              prompt: preferences.prompt,
+              estimatedTimeMinutes: estimatedTimeMinutes,
+            };
+            setLastRouteData(routeData);
+            props.onRouteGenerated(routeData);
+          }
+        } catch (error) {
+          console.error("Route generation error:", error);
+          alert("Помилка при генерації маршруту: " + (error instanceof Error ? error.message : "Невідома помилка"));
+          if (props.onRouteSummary) {
+            props.onRouteSummary("Помилка при генерації маршруту");
+          }
+        } finally {
+          setIsGenerating(false);
+        }
+      },
+      [userLocation, props.onRouteSummary, props.onRouteGenerated]
+    );
+
+    // Отримати та відобразити маршрут при зміні точок
     useEffect(() => {
       if (!points || points.length < 2) {
         setRouteGeoJson(null);
@@ -664,10 +797,9 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>(
 
       const fetchAndDraw = async () => {
         try {
-          // Convert [lat, lng] to [lng, lat] for Mapbox
-          const coordinates = points.map((p) => [p[1], p[0]]);
+          const coordinates = points.map((p) => [p[1], p[0]]); // [lng, lat] для Mapbox
           const route = await getRouteFromMapbox(coordinates, {
-            alternatives: true, // Enable alternatives for better route selection
+            alternatives: true,
             steps: false,
             overview: "full",
             maxDistance: maxDistanceMeters,
@@ -678,7 +810,6 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>(
           if (route) {
             setRouteGeoJson(route);
 
-            // Fit map to route bounds
             if (mapRef.current && route.features[0]?.geometry) {
               const geometry = route.features[0].geometry as GeoJSON.LineString;
               if (geometry.coordinates && geometry.coordinates.length > 0) {
@@ -702,13 +833,10 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>(
               }
             }
           } else {
-            // If route generation failed, show warning but don't break the UI
-            console.warn("Failed to generate route from Mapbox. Points may be too far apart or unreachable.");
-            // Keep the points visible even if route generation fails
+            console.warn("Failed to generate route from Mapbox");
           }
         } catch (err) {
           console.error("Routing error:", err);
-          // Don't clear points on error - user should still see what they selected
         }
       };
 
@@ -719,407 +847,6 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>(
       };
     }, [points, clearSignal, maxDistanceMeters]);
 
-    const generateRouteFromPreferences = React.useCallback(
-      async (preferences: WalkPreferences) => {
-        // Якщо геолокація не ввімкнена, спробувати автоматично отримати
-        let currentLocation = userLocation;
-
-        if (!currentLocation) {
-          // Спробувати отримати поточну позицію
-          if (navigator.geolocation) {
-            try {
-              const position = await new Promise<GeolocationPosition>(
-                (resolve, reject) => {
-                  navigator.geolocation.getCurrentPosition(resolve, reject, {
-                    enableHighAccuracy: true,
-                    timeout: 10000,
-                    maximumAge: 300000, // Використовувати кешовану позицію до 5 хвилин
-                  });
-                }
-              );
-              const { latitude, longitude } = position.coords;
-              currentLocation = [latitude, longitude];
-              setUserLocation(currentLocation);
-              geolocationPermissionRef.current = true;
-            } catch (error) {
-              alert(
-                "Будь ласка, надайте дозвіл на геолокацію для генерації маршруту"
-              );
-              setIsGenerating(false);
-              return;
-            }
-          } else {
-            alert("Геолокація не підтримується вашим браузером");
-            setIsGenerating(false);
-            return;
-          }
-        }
-
-        if (!currentLocation) {
-          setIsGenerating(false);
-          return;
-        }
-
-        setIsGenerating(true);
-        try {
-          // Merge prompt-derived hints with manual locations
-          const promptLocations = extractLocationsFromPrompt(
-            preferences.prompt
-          );
-          const combinedLocations = Array.from(
-            new Set([...preferences.locations, ...promptLocations])
-          );
-
-          // Determine distance - використовуємо distanceKm якщо вказано, інакше визначаємо з промпту або використовуємо 3 км за замовчуванням
-          const targetDistanceKm = preferences.distanceKm
-            ? preferences.distanceKm
-            : inferDistanceFromPrompt(preferences.prompt, 3);
-
-          // Geocode all locations
-          const locationCoords: LatLngTuple[] = [];
-          for (const location of combinedLocations) {
-            const coords = await geocodeLocation(location);
-            if (coords) {
-              locationCoords.push(coords);
-            } else {
-              console.warn(`Could not geocode location: ${location}`);
-            }
-          }
-
-          // Calculate average walking speed (km/h) - typical is 4-5 km/h
-          const walkingSpeedKmh = 4.5;
-          const maxDistanceMeters = targetDistanceKm * 1000;
-          
-          // Set max distance for route generation (with 20% buffer for flexibility)
-          setMaxDistanceMeters(Math.round(maxDistanceMeters * 1.2));
-
-          // Start with user location
-          const routePoints: LatLngTuple[] = [currentLocation];
-
-          // If no locations found but prompt exists, try to find POI based on prompt
-          let finalDistanceKm = targetDistanceKm;
-          if (locationCoords.length === 0) {
-            if (preferences.prompt && preferences.prompt.trim()) {
-              // Try to extract keywords from prompt and search for nearby POI
-              const promptLower = preferences.prompt.toLowerCase();
-              const searchQueries: string[] = [];
-
-              // Extract common location types from prompt
-              if (
-                promptLower.includes("парк") ||
-                promptLower.includes("park") ||
-                promptLower.includes("до парку") ||
-                promptLower.includes("до парка")
-              ) {
-                searchQueries.push("park");
-              }
-              if (
-                promptLower.includes("кафе") ||
-                promptLower.includes("cafe") ||
-                promptLower.includes("кав")
-              ) {
-                searchQueries.push("cafe");
-              }
-              if (
-                promptLower.includes("магазин") ||
-                promptLower.includes("shop") ||
-                promptLower.includes("атб") ||
-                promptLower.includes("atb") ||
-                promptLower.includes("сільпо") ||
-                promptLower.includes("silpo")
-              ) {
-                searchQueries.push("supermarket");
-              }
-              if (
-                promptLower.includes("ресторан") ||
-                promptLower.includes("restaurant")
-              ) {
-                searchQueries.push("restaurant");
-              }
-              if (
-                promptLower.includes("музей") ||
-                promptLower.includes("museum")
-              ) {
-                searchQueries.push("museum");
-              }
-              if (
-                promptLower.includes("церква") ||
-                promptLower.includes("church") ||
-                promptLower.includes("храм")
-              ) {
-                searchQueries.push("church");
-              }
-
-              // If no specific keywords found, try to extract any location name from prompt
-              if (searchQueries.length === 0) {
-                // Try to find location names (words after "до", "в", "на")
-                const locationPatterns = [
-                  /до\s+([а-яa-z]+)/i,
-                  /в\s+([а-яa-z]+)/i,
-                  /на\s+([а-яa-z]+)/i,
-                ];
-
-                for (const pattern of locationPatterns) {
-                  const match = promptLower.match(pattern);
-                  if (match && match[1]) {
-                    searchQueries.push(match[1]);
-                    break;
-                  }
-                }
-              }
-
-              // Search for POI based on extracted keywords
-              const searchRadius = Math.min(targetDistanceKm * 500, 5000); // Increased search radius
-              const foundPOIs: LatLngTuple[] = [];
-
-              // Search for all queries in parallel (currentLocation is guaranteed to be non-null here)
-              if (currentLocation) {
-                const location: LatLngTuple = currentLocation; // Type assertion for TypeScript
-                const poiPromises = searchQueries.map((query) =>
-                  searchNearbyPOI(location, query, searchRadius)
-                );
-                const poiResults = await Promise.all(poiPromises);
-
-                for (const pois of poiResults) {
-                  foundPOIs.push(...pois);
-                }
-              }
-
-              // Remove duplicates (points that are very close to each other)
-              const uniquePOIs: LatLngTuple[] = [];
-              for (const poi of foundPOIs) {
-                const isDuplicate = uniquePOIs.some(
-                  (existing) => calculateDistance(existing, poi) < 0.1 // Less than 100m apart
-                );
-                if (!isDuplicate) {
-                  uniquePOIs.push(poi);
-                }
-              }
-
-              if (uniquePOIs.length > 0) {
-                // Use found POIs to create route
-                locationCoords.push(...uniquePOIs.slice(0, 5)); // Limit to 5 POIs
-                // Continue to route generation with POIs below
-              } else {
-                // If no POIs found, try to search for generic "park" or create circular route
-                // Try one more generic search
-                if (currentLocation) {
-                  const location: LatLngTuple = currentLocation; // Type assertion for TypeScript
-                  const genericPOIs = await searchNearbyPOI(
-                    location,
-                    "park",
-                    Math.min(targetDistanceKm * 500, 3000)
-                  );
-                  if (genericPOIs.length > 0) {
-                    locationCoords.push(...genericPOIs.slice(0, 3));
-                  } else {
-                    // Create circular route
-                    const radiusKm = targetDistanceKm / (2 * Math.PI);
-                    const radiusMeters = radiusKm * 1000;
-                    const [lat, lng] = currentLocation;
-                    const latOffset = radiusMeters / 111000;
-                    const lngOffset =
-                      radiusMeters / (111000 * Math.cos((lat * Math.PI) / 180));
-
-                    const numPoints = 6;
-                    for (let i = 0; i < numPoints; i++) {
-                      const angle = (i * 2 * Math.PI) / numPoints;
-                      const pointLat = lat + latOffset * Math.cos(angle);
-                      const pointLng = lng + lngOffset * Math.sin(angle);
-                      routePoints.push([pointLat, pointLng]);
-                    }
-                    routePoints.push(currentLocation);
-
-                    if (routePoints.length > 1) {
-                      let totalDistance = 0;
-                      for (let i = 0; i < routePoints.length - 1; i++) {
-                        totalDistance += calculateDistance(
-                          routePoints[i],
-                          routePoints[i + 1]
-                        );
-                      }
-                      finalDistanceKm = totalDistance;
-                    }
-                  }
-                }
-              }
-            } else {
-              alert("Додайте місця або промпт із цілями маршруту");
-              setIsGenerating(false);
-              if (props.onRouteSummary) {
-                props.onRouteSummary(
-                  "Маршрут не згенеровано: необхідно вказати місця або промпт."
-                );
-              }
-              return;
-            }
-          }
-
-          // If we have location coordinates (either from manual input or POI search), create route
-          if (locationCoords.length > 0) {
-            // Try to include locations within constraints
-            // Simple approach: include locations that fit within distance/time constraints
-            let currentDistance = 0;
-            const visited = new Set<number>();
-
-            // Find closest locations first
-            while (
-              routePoints.length < locationCoords.length + 1 &&
-              visited.size < locationCoords.length
-            ) {
-              let closestIdx = -1;
-              let closestDist = Infinity;
-              const lastPoint = routePoints[routePoints.length - 1];
-
-              for (let i = 0; i < locationCoords.length; i++) {
-                if (visited.has(i)) continue;
-
-                const dist = calculateDistance(lastPoint, locationCoords[i]);
-                if (dist < closestDist) {
-                  closestDist = dist;
-                  closestIdx = i;
-                }
-              }
-
-              if (closestIdx === -1) break;
-
-              const distanceToAdd = closestDist * 1000; // convert to meters
-              // Check if adding this location would exceed constraints
-              if (currentDistance + distanceToAdd <= maxDistanceMeters) {
-                routePoints.push(locationCoords[closestIdx]);
-                currentDistance += distanceToAdd;
-                visited.add(closestIdx);
-              } else {
-                break;
-              }
-            }
-
-            // Return to start if possible
-            if (routePoints.length > 1) {
-              const returnDist =
-                calculateDistance(
-                  routePoints[routePoints.length - 1],
-                  currentLocation
-                ) * 1000;
-              if (currentDistance + returnDist <= maxDistanceMeters) {
-                routePoints.push(currentLocation);
-              }
-            }
-
-            // Calculate final distance from actual points
-            if (routePoints.length > 1) {
-              let totalDistance = 0;
-              for (let i = 0; i < routePoints.length - 1; i++) {
-                totalDistance += calculateDistance(
-                  routePoints[i],
-                  routePoints[i + 1]
-                );
-              }
-              finalDistanceKm = totalDistance;
-            }
-          }
-
-          // Ensure we have at least 2 points for route generation
-          if (routePoints.length < 2) {
-            // If no route points, create a simple circular route
-            const radiusKm = targetDistanceKm / (2 * Math.PI);
-            const radiusMeters = radiusKm * 1000;
-            const [lat, lng] = currentLocation;
-            const latOffset = radiusMeters / 111000;
-            const lngOffset =
-              radiusMeters / (111000 * Math.cos((lat * Math.PI) / 180));
-
-            const numPoints = 6;
-            for (let i = 0; i < numPoints; i++) {
-              const angle = (i * 2 * Math.PI) / numPoints;
-              const pointLat = lat + latOffset * Math.cos(angle);
-              const pointLng = lng + lngOffset * Math.sin(angle);
-              routePoints.push([pointLat, pointLng]);
-            }
-            routePoints.push(currentLocation);
-
-            // Calculate distance
-            let totalDistance = 0;
-            for (let i = 0; i < routePoints.length - 1; i++) {
-              totalDistance += calculateDistance(
-                routePoints[i],
-                routePoints[i + 1]
-              );
-            }
-            finalDistanceKm = totalDistance;
-          }
-
-          // Calculate estimated time (assuming 4.5 km/h walking speed)
-          const estimatedTimeMinutes = (finalDistanceKm / 4.5) * 60;
-
-          // Set the generated points
-          setGeneratedPoints(routePoints);
-          setPoints(routePoints);
-          setClearSignal((s) => s + 1); // Clear previous route
-
-          if (props.onRouteSummary) {
-            let summaryText = "";
-            if (locationCoords.length === 0 && preferences.prompt) {
-              summaryText = `Маршрут згенеровано на основі промпту. Орієнтовна довжина: ${finalDistanceKm.toFixed(
-                1
-              )} км.`;
-            } else {
-              const includedLocations = combinedLocations.slice(
-                0,
-                Math.min(routePoints.length - 1, combinedLocations.length)
-              );
-              summaryText =
-                routePoints.length > 1
-                  ? `Маршрут стартує з вашої локації${
-                      includedLocations.length > 0
-                        ? ` та включає: ${includedLocations.join(", ")}`
-                        : ""
-                    }. Орієнтовна довжина: ${finalDistanceKm.toFixed(1)} км.`
-                  : "Не вдалося побудувати маршрут з обраними параметрами.";
-            }
-            props.onRouteSummary(summaryText);
-          }
-
-          // Callback for statistics
-          if (props.onRouteGenerated && routePoints.length > 1) {
-            const routeData = {
-              distanceKm: finalDistanceKm,
-              locations: combinedLocations,
-              prompt: preferences.prompt,
-              estimatedTimeMinutes: estimatedTimeMinutes,
-            };
-            setLastRouteData(routeData);
-            props.onRouteGenerated(routeData);
-          }
-        } catch (error) {
-          console.error("Route generation error:", error);
-          alert("Помилка при генерації маршруту");
-        } finally {
-          setIsGenerating(false);
-        }
-      },
-      [userLocation, props.onRouteSummary, props.onRouteGenerated]
-    );
-
-    // Calculate distance between two points in kilometers (Haversine formula)
-    const calculateDistance = (
-      point1: LatLngTuple,
-      point2: LatLngTuple
-    ): number => {
-      const R = 6371; // Earth's radius in km
-      const dLat = ((point2[0] - point1[0]) * Math.PI) / 180;
-      const dLon = ((point2[1] - point1[1]) * Math.PI) / 180;
-      const a =
-        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-        Math.cos((point1[0] * Math.PI) / 180) *
-          Math.cos((point2[0] * Math.PI) / 180) *
-          Math.sin(dLon / 2) *
-          Math.sin(dLon / 2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      return R * c;
-    };
-
-    // Expose generateRouteFromPreferences and requestGeolocation to parent via ref
     const handleSaveRoute = async () => {
       if (!user || !lastRouteData || generatedPoints.length < 2) {
         alert("Неможливо зберегти маршрут. Спробуйте ще раз.");
@@ -1133,13 +860,11 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>(
           `Маршрут ${new Date().toLocaleDateString("uk-UA")}`;
         const estimatedTimeMinutes = lastRouteData.estimatedTimeMinutes;
 
-        // Конвертуємо точки в правильний формат [lat, lng]
         const points: [number, number][] = generatedPoints.map((point) => [
           point[0],
           point[1],
         ]);
 
-        // Зберегти маршрут через функцію saveRoute
         const savedRouteData = await supabaseModules.saveRoute({
           name: routeName,
           description: lastRouteData.prompt,
@@ -1155,13 +880,11 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>(
           is_public: false,
         });
 
-        // Автоматично додати маршрут в улюблені
         if (savedRouteData && savedRouteData.id) {
           try {
             await supabaseModules.addToFavorites(savedRouteData.id);
           } catch (favErr) {
             console.warn("Помилка додавання в улюблені:", favErr);
-            // Маршрут збережено, але не додано в улюблені - це не критично
           }
         }
 
@@ -1174,7 +897,6 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>(
       }
     };
 
-    // Load saved route from points
     const loadSavedRoute = React.useCallback(
       async (routeData: {
         points: [number, number][];
@@ -1188,11 +910,8 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>(
 
         try {
           setIsGenerating(true);
-
-          // Set route points
           setPoints(routeData.points as LatLngTuple[]);
 
-          // Calculate and display distance
           let totalDistance = 0;
           for (let i = 0; i < routeData.points.length - 1; i++) {
             totalDistance += calculateDistance(
@@ -1201,7 +920,6 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>(
             );
           }
 
-          // Create summary
           const summaryText = `Завантажений маршрут "${
             routeData.name || "Без назви"
           }". Довжина: ${totalDistance.toFixed(1)} км.`;
@@ -1214,7 +932,7 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>(
           setIsGenerating(false);
         }
       },
-      [calculateDistance, props]
+      [props]
     );
 
     React.useImperativeHandle(
@@ -1229,7 +947,7 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>(
           }
         },
       }),
-      [generateRouteFromPreferences, loadSavedRoute, isGenerating, userLocation]
+      [generateRouteFromPreferences, loadSavedRoute, isGenerating]
     );
 
     return (
@@ -1384,7 +1102,7 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>(
                   width: "20px",
                   height: "20px",
                   borderRadius: "50%",
-                  backgroundColor: "#198754",
+                  backgroundColor: idx === 0 ? "#198754" : "#dc3545",
                   border: "2px solid white",
                   boxShadow: "0 2px 5px rgba(0,0,0,0.3)",
                 }}
@@ -1397,7 +1115,7 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>(
                   onClose={() => setSelectedMarker(null)}
                   anchor="bottom"
                 >
-                  <strong>Точка {idx + 1}</strong>
+                  <strong>{idx === 0 ? "Старт" : `Точка ${idx}`}</strong>
                   <br />
                   {pos[0].toFixed(5)}, {pos[1].toFixed(5)}
                 </Popup>
