@@ -138,12 +138,12 @@ const Profile: React.FC = () => {
       (sum, stat) => sum + (stat.duration_minutes || 0),
       0
     );
-    const avgPace = totalDistance > 0 ? totalTime / 60 / totalDistance : 0;
+    const avgSpeed = totalTime > 0 ? (totalDistance * 60) / totalTime : 0; // км/год
     return {
       walks: statistics.length,
       distance: totalDistance,
       time: totalTime,
-      pace: avgPace,
+      pace: avgSpeed,
     };
   };
 

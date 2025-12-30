@@ -685,13 +685,13 @@ export async function addWalkStatistic(stat: WalkStatistic) {
   const userStats = await getUserWalkStatistics(user.id);
   const totalDistance = userStats.reduce((sum, s) => sum + s.distance_km, 0);
   const totalTime = userStats.reduce((sum, s) => sum + s.duration_minutes, 0);
-  const avgPace = totalDistance > 0 ? (totalTime / 60) / totalDistance : 0;
+  const avgSpeed = totalTime > 0 ? (totalDistance * 60) / totalTime : 0; // км/год
 
   await updateUserProfile(user.id, {
     total_walks: userStats.length,
     total_distance: totalDistance,
     total_time: totalTime,
-    average_pace: parseFloat(avgPace.toFixed(2)),
+    average_pace: parseFloat(avgSpeed.toFixed(2)),
   });
 
   return data;

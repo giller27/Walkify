@@ -91,17 +91,19 @@ function Home() {
     // Зберегти статистику в Supabase, якщо користувач авторизований
     if (user) {
       try {
+        const todayDate = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
         await addWalkStatistic({
           user_id: user.id,
-          date: new Date().toISOString(),
+          date: todayDate,
           distance_km: data.distanceKm,
-          duration_minutes: data.estimatedTimeMinutes,
+          duration_minutes: Math.round(data.estimatedTimeMinutes), // Округлити до INTEGER
           pace:
             data.estimatedTimeMinutes > 0
               ? data.distanceKm / (data.estimatedTimeMinutes / 60)
               : 0,
           notes: data.prompt || undefined,
-        });
+        } as any);
+        console.log("Статистика успішно додана");
       } catch (err) {
         console.error("Помилка збереження статистики:", err);
       }

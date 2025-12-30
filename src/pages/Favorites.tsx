@@ -213,7 +213,7 @@ function Favorites() {
               size="sm"
               onClick={() => handleViewRoute(route)}
             >
-              <i className="bi bi-map"></i> Глядати на карті
+              <i className="bi bi-map"></i> Переглянути на карті
             </Button>
 
             {!route.is_public && !isMyPublished && (
