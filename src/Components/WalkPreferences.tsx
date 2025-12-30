@@ -189,7 +189,7 @@ const WalkPreferencesBar: React.FC<WalkPreferencesProps> = ({
                   variant="success"
                   type="submit"
                   className="w-100"
-                  disabled={(!prompt.trim() && locations.length === 0) || isGenerating}
+                  disabled={isGenerating}
                 >
                   {isGenerating ? (
                     <>

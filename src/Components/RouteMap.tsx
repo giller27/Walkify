@@ -31,10 +31,59 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
     const mapRef = useRef<mapboxgl.Map | null>(null);
     const [isGenerating, setIsGenerating] = useState(false);
     const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
+    const [userHeading, setUserHeading] = useState<number | null>(null);
     const [isLocating, setIsLocating] = useState(false);
     const routeLayerRef = useRef<string | null>(null);
     const markersRef = useRef<mapboxgl.Marker[]>([]);
     const userLocationMarkerRef = useRef<mapboxgl.Marker | null>(null);
+    const watchIdRef = useRef<number | null>(null);
+
+    // Функція для оновлення маркера користувача
+    const updateUserMarker = (longitude: number, latitude: number, heading: number | null) => {
+      if (!mapRef.current) return;
+
+      // Видалити попередній маркер, якщо він є
+      if (userLocationMarkerRef.current) {
+        userLocationMarkerRef.current.remove();
+      }
+
+      // Створити кастомний маркер з напрямком
+      const el = document.createElement("div");
+      el.className = "user-location-marker";
+      el.style.width = "24px";
+      el.style.height = "24px";
+      el.style.borderRadius = "50%";
+      el.style.backgroundColor = "#007bff";
+      el.style.border = "3px solid white";
+      el.style.boxShadow = "0 2px 6px rgba(0,0,0,0.3)";
+      el.style.position = "relative";
+      el.style.cursor = "pointer";
+
+      // Додати стрілку напрямку, якщо heading доступний
+      if (heading !== null && !isNaN(heading)) {
+        const arrow = document.createElement("div");
+        arrow.style.position = "absolute";
+        arrow.style.top = "-8px";
+        arrow.style.left = "50%";
+        arrow.style.transform = `translateX(-50%) rotate(${heading}deg)`;
+        arrow.style.width = "0";
+        arrow.style.height = "0";
+        arrow.style.borderLeft = "4px solid transparent";
+        arrow.style.borderRight = "4px solid transparent";
+        arrow.style.borderBottom = "8px solid #007bff";
+        el.appendChild(arrow);
+      }
+
+      // Додати маркер на поточну позицію
+      const marker = new mapboxgl.Marker({
+        element: el,
+        anchor: "center",
+      })
+        .setLngLat([longitude, latitude])
+        .addTo(mapRef.current);
+
+      userLocationMarkerRef.current = marker;
+    };
 
     // Ініціалізація карти
     useEffect(() => {
@@ -59,17 +108,12 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
         navigator.geolocation.getCurrentPosition(
           (position) => {
             const { longitude, latitude } = position.coords;
+            const heading = position.coords.heading ?? null;
             setUserLocation([latitude, longitude]);
+            setUserHeading(heading);
             
-            // Додати маркер на позицію користувача
-            const marker = new mapboxgl.Marker({
-              color: "#007bff",
-              scale: 1.2,
-            })
-              .setLngLat([longitude, latitude])
-              .addTo(map);
-
-            userLocationMarkerRef.current = marker;
+            // Додати кастомний маркер на позицію користувача
+            updateUserMarker(longitude, latitude, heading);
 
             map.flyTo({
               center: [longitude, latitude],
@@ -80,12 +124,19 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
             console.log("Геолокація недоступна:", error);
           },
           {
-            enableHighAccuracy: false,
+            enableHighAccuracy: true,
             timeout: 5000,
             maximumAge: 60000, // Використати кешовану позицію до 1 хвилини
           }
         );
       }
+
+      return () => {
+        // Зупинити відстеження при розмонтуванні
+        if (watchIdRef.current !== null && navigator.geolocation) {
+          navigator.geolocation.clearWatch(watchIdRef.current);
+        }
+      };
 
       return () => {
         map.remove();
@@ -232,67 +283,90 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
 
         waypoints.push(startPoint);
 
-        // Обробити локації з preferences
-        if (preferences.locations && preferences.locations.length > 0) {
-          for (const location of preferences.locations) {
-            const coords = await geocodeLocation(location);
-            if (coords) {
-              waypoints.push(coords);
-            } else {
-              // Якщо геокодування не вдалося, спробувати знайти POI
-              const poiCoords = await findPOI(startPoint, location);
-              if (poiCoords) {
-                waypoints.push(poiCoords);
-              }
-            }
+        // Якщо немає локацій та промпту, створити простий маршрут навколо початкової точки
+        const hasLocations = preferences.locations && preferences.locations.length > 0;
+        const hasPrompt = preferences.prompt && preferences.prompt.trim().length > 0;
+
+        if (!hasLocations && !hasPrompt) {
+          // Створити простий круговий маршрут навколо початкової точки
+          const targetDistance = preferences.distanceKm || 2; // За замовчуванням 2 км
+          const radiusKm = targetDistance / (2 * Math.PI); // Радіус для кругового маршруту
+          
+          // Створити 4 точки навколо початкової точки
+          const [lat, lng] = startPoint;
+          const pointsCount = 4;
+          for (let i = 0; i < pointsCount; i++) {
+            const angle = (i * 2 * Math.PI) / pointsCount;
+            // Приблизна формула для додавання відстані в градусах
+            const deltaLat = (radiusKm / 111) * Math.cos(angle);
+            const deltaLng = (radiusKm / (111 * Math.cos(lat * Math.PI / 180))) * Math.sin(angle);
+            waypoints.push([lat + deltaLat, lng + deltaLng]);
           }
-        }
-
-        // Якщо є промпт, спробувати витягти з нього інформацію
-        if (preferences.prompt) {
-          // Простий парсинг промпту для пошуку ключових слів
-          const promptLower = preferences.prompt.toLowerCase();
-          const keywords = ["кафе", "cafe", "парк", "park", "магазин", "shop", "ресторан", "restaurant", "музей", "museum"];
-
-          for (const keyword of keywords) {
-            if (promptLower.includes(keyword)) {
-              const poiCoords = await findPOI(
-                waypoints[waypoints.length - 1],
-                keyword,
-                2000
-              );
-              if (poiCoords) {
-                // Перевірити, чи точка не дуже далеко
-                const lastPoint = waypoints[waypoints.length - 1];
-                const distance = calculateDistance(lastPoint, poiCoords);
-                if (distance < 5) {
-                  // Максимум 5 км від попередньої точки
+          // Повернутися до початкової точки
+          waypoints.push(startPoint);
+        } else {
+          // Обробити локації з preferences
+          if (hasLocations) {
+            for (const location of preferences.locations) {
+              const coords = await geocodeLocation(location);
+              if (coords) {
+                waypoints.push(coords);
+              } else {
+                // Якщо геокодування не вдалося, спробувати знайти POI
+                const poiCoords = await findPOI(startPoint, location);
+                if (poiCoords) {
                   waypoints.push(poiCoords);
                 }
               }
             }
           }
-        }
 
-        // Якщо вказана відстань, намагатися відрегулювати маршрут
-        if (preferences.distanceKm && preferences.distanceKm > 0) {
-          // Якщо маршрут занадто короткий, додати додаткові точки
-          let currentDistance = 0;
-          for (let i = 0; i < waypoints.length - 1; i++) {
-            currentDistance += calculateDistance(waypoints[i], waypoints[i + 1]);
+          // Якщо є промпт, спробувати витягти з нього інформацію
+          if (hasPrompt) {
+            // Простий парсинг промпту для пошуку ключових слів
+            const promptLower = preferences.prompt.toLowerCase();
+            const keywords = ["кафе", "cafe", "парк", "park", "магазин", "shop", "ресторан", "restaurant", "музей", "museum"];
+
+            for (const keyword of keywords) {
+              if (promptLower.includes(keyword)) {
+                const poiCoords = await findPOI(
+                  waypoints[waypoints.length - 1],
+                  keyword,
+                  2000
+                );
+                if (poiCoords) {
+                  // Перевірити, чи точка не дуже далеко
+                  const lastPoint = waypoints[waypoints.length - 1];
+                  const distance = calculateDistance(lastPoint, poiCoords);
+                  if (distance < 5) {
+                    // Максимум 5 км від попередньої точки
+                    waypoints.push(poiCoords);
+                  }
+                }
+              }
+            }
           }
 
-          if (currentDistance < preferences.distanceKm * 0.8) {
-            // Якщо маршрут на 20% коротший за цільову відстань, додати точки
-            const targetDistance = preferences.distanceKm;
-            const additionalPoints = Math.ceil((targetDistance - currentDistance) / 2);
+          // Якщо вказана відстань, намагатися відрегулювати маршрут
+          if (preferences.distanceKm && preferences.distanceKm > 0) {
+            // Якщо маршрут занадто короткий, додати додаткові точки
+            let currentDistance = 0;
+            for (let i = 0; i < waypoints.length - 1; i++) {
+              currentDistance += calculateDistance(waypoints[i], waypoints[i + 1]);
+            }
 
-            for (let i = 0; i < additionalPoints; i++) {
-              const lastPoint = waypoints[waypoints.length - 1];
-              // Знайти POI навколо останньої точки
-              const poiCoords = await findPOI(lastPoint, "park", 1500);
-              if (poiCoords) {
-                waypoints.push(poiCoords);
+            if (currentDistance < preferences.distanceKm * 0.8) {
+              // Якщо маршрут на 20% коротший за цільову відстань, додати точки
+              const targetDistance = preferences.distanceKm;
+              const additionalPoints = Math.ceil((targetDistance - currentDistance) / 2);
+
+              for (let i = 0; i < additionalPoints; i++) {
+                const lastPoint = waypoints[waypoints.length - 1];
+                // Знайти POI навколо останньої точки
+                const poiCoords = await findPOI(lastPoint, "park", 1500);
+                if (poiCoords) {
+                  waypoints.push(poiCoords);
+                }
               }
             }
           }
@@ -409,26 +483,22 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
 
       setIsLocating(true);
 
+      // Зупинити попереднє відстеження, якщо воно є
+      if (watchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+        watchIdRef.current = null;
+      }
+
+      // Спочатку отримати поточну позицію
       navigator.geolocation.getCurrentPosition(
         (position) => {
           const { longitude, latitude } = position.coords;
+          const heading = position.coords.heading ?? null;
           setUserLocation([latitude, longitude]);
+          setUserHeading(heading);
           
           if (mapRef.current) {
-            // Видалити попередній маркер, якщо він є
-            if (userLocationMarkerRef.current) {
-              userLocationMarkerRef.current.remove();
-            }
-
-            // Додати маркер на поточну позицію
-            const marker = new mapboxgl.Marker({
-              color: "#007bff",
-              scale: 1.2,
-            })
-              .setLngLat([longitude, latitude])
-              .addTo(mapRef.current);
-
-            userLocationMarkerRef.current = marker;
+            updateUserMarker(longitude, latitude, heading);
 
             // Центрувати карту на позиції користувача
             mapRef.current.flyTo({
@@ -438,6 +508,43 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
             });
           }
           setIsLocating(false);
+
+          // Почати відстеження позиції для оновлення маркера
+          watchIdRef.current = navigator.geolocation.watchPosition(
+            (position) => {
+              const { longitude, latitude } = position.coords;
+              const heading = position.coords.heading ?? null;
+              setUserLocation([latitude, longitude]);
+              setUserHeading(heading);
+              
+              if (mapRef.current && userLocationMarkerRef.current) {
+                // Оновити позицію маркера
+                userLocationMarkerRef.current.setLngLat([longitude, latitude]);
+                
+                // Оновити напрямок, якщо він змінився
+                if (heading !== null && !isNaN(heading)) {
+                  const markerEl = userLocationMarkerRef.current.getElement();
+                  if (markerEl) {
+                    const arrow = markerEl.querySelector("div") as HTMLElement;
+                    if (arrow) {
+                      arrow.style.transform = `translateX(-50%) rotate(${heading}deg)`;
+                    } else {
+                      // Якщо стрілки немає, оновити весь маркер
+                      updateUserMarker(longitude, latitude, heading);
+                    }
+                  }
+                }
+              }
+            },
+            (error) => {
+              console.error("Помилка відстеження геолокації:", error);
+            },
+            {
+              enableHighAccuracy: true,
+              timeout: 10000,
+              maximumAge: 1000,
+            }
+          );
         },
         (error) => {
           console.error("Помилка отримання геолокації:", error);
@@ -605,45 +712,49 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
         <button
           onClick={requestGeolocation}
           disabled={isLocating}
+          className="btn btn-primary"
           style={{
             position: "absolute",
-            bottom: "20px",
+            bottom: "100px",
             right: "20px",
-            zIndex: 1000,
+            zIndex: 2000,
             width: "48px",
             height: "48px",
             borderRadius: "50%",
             backgroundColor: isLocating ? "#6c757d" : "#007bff",
-            border: "none",
+            border: "2px solid white",
             color: "white",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             cursor: isLocating ? "not-allowed" : "pointer",
-            boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+            boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
             transition: "all 0.2s ease",
+            padding: 0,
           }}
           onMouseEnter={(e) => {
             if (!isLocating) {
               e.currentTarget.style.backgroundColor = "#0056b3";
               e.currentTarget.style.transform = "scale(1.1)";
+              e.currentTarget.style.boxShadow = "0 6px 16px rgba(0,0,0,0.5)";
             }
           }}
           onMouseLeave={(e) => {
             if (!isLocating) {
               e.currentTarget.style.backgroundColor = "#007bff";
               e.currentTarget.style.transform = "scale(1)";
+              e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,0,0,0.4)";
             }
           }}
           title={isLocating ? "Отримання геолокації..." : "Знайти моє місцезнаходження"}
           aria-label="Знайти моє місцезнаходження"
         >
           {isLocating ? (
-            <div className="spinner-border spinner-border-sm" role="status">
+            <div className="spinner-border spinner-border-sm" role="status" style={{ width: "20px", height: "20px" }}>
               <span className="visually-hidden">Завантаження...</span>
             </div>
           ) : (
-            <i className="bi bi-geo-alt-fill" style={{ fontSize: "20px" }}></i>
+            <i className="bi bi-geo-alt-fill" style={{ fontSize: "24px" }}></i>
           )}
         </button>
       </div>
