@@ -216,19 +216,6 @@ const Profile: React.FC = () => {
                   />
                 )}
               </div>
-
-              {isEditing && (
-                <div className="mb-3">
-                  <Form.Group>
-                    <Form.Label>Change Avatar</Form.Label>
-                    <Form.Control
-                      type="file"
-                      accept="image/*"
-                      onChange={handleAvatarChange}
-                    />
-                  </Form.Group>
-                </div>
-              )}
               <h4
                 className="mb-1"
                 style={{ fontSize: "24px", fontWeight: "bold", color: "black" }}
@@ -348,18 +335,6 @@ const Profile: React.FC = () => {
                       value={formData.full_name}
                       onChange={handleInputChange}
                       disabled={loading}
-                    />
-                  </Form.Group>
-
-                  <Form.Group className="mb-3">
-                    <Form.Label>Email</Form.Label>
-                    <Form.Control
-                      type="text"
-                      name="email"
-                      value={formData.email}
-                      onChange={handleInputChange}
-                      disabled={loading}
-                      placeholder="Виберіть унікальну почту"
                     />
                   </Form.Group>
 

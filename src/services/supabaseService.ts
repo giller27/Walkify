@@ -298,23 +298,21 @@ export async function updateUserProfile(userId: string, updates: Partial<UserPro
  */
 export async function uploadAvatar(userId: string, file: File) {
   const fileExt = file.name.split('.').pop();
-  const fileName = `${userId}-${Date.now()}.${fileExt}`;
+  const fileName = `${Date.now()}.${fileExt}`;
+  const filePath = `${userId}/${fileName}`; // Папка за userId для RLS
 
-  const { data, error } = await supabase.storage
+  const { error: uploadError } = await supabase.storage
     .from('avatars')
-    .upload(fileName, file, { upsert: true });
+    .upload(filePath, file, { upsert: true });
 
-  if (error) throw error;
+  if (uploadError) throw uploadError;
 
   // Отримати публічний URL
-  const { data: { publicUrl } } = supabase.storage
+  const { data } = supabase.storage
     .from('avatars')
-    .getPublicUrl(fileName);
+    .getPublicUrl(filePath);
 
-  // Оновити URL в профілі
-  await updateUserProfile(userId, { avatar_url: publicUrl });
-
-  return publicUrl;
+  return data.publicUrl;
 }
 
 /**
