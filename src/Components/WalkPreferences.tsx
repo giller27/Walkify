@@ -38,8 +38,9 @@ const WalkPreferencesBar: React.FC<WalkPreferencesProps> = ({
   }, [initialPreferences]);
 
   const addLocation = () => {
-    if (locationInput.trim() && !locations.includes(locationInput.trim())) {
-      setLocations([...locations, locationInput.trim()]);
+    const trimmed = locationInput.trim();
+    if (trimmed && !locations.includes(trimmed)) {
+      setLocations([...locations, trimmed]);
       setLocationInput("");
     }
   };
@@ -50,15 +51,17 @@ const WalkPreferencesBar: React.FC<WalkPreferencesProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Request geolocation permission if handler is provided
+    
+    // Запит геолокації, якщо є обробник
     if (onRequestGeolocation) {
       onRequestGeolocation();
     }
-    // Allow generation even without locations (prompt is now primary)
+    
+    // Всі поля необов'язкові - можна генерувати маршрут без них
     onGenerate({
       locations,
       distanceKm: distanceKm && distanceKm > 0 ? distanceKm : undefined,
-      prompt,
+      prompt: prompt.trim() || undefined,
     });
   };
 
@@ -71,7 +74,7 @@ const WalkPreferencesBar: React.FC<WalkPreferencesProps> = ({
 
   return (
     <>
-      {/* Toggle handle */}
+      {/* Кнопка перемикання панелі */}
       <button
         className="btn btn-success position-fixed rounded-circle"
         style={{
@@ -82,35 +85,42 @@ const WalkPreferencesBar: React.FC<WalkPreferencesProps> = ({
           height: "48px",
           zIndex: 1100,
           boxShadow: "0 4px 10px rgba(0,0,0,0.25)",
+          border: "none",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
         }}
         aria-label={isOpen ? "Сховати панель налаштувань" : "Показати панель налаштувань"}
-        onClick={() => setIsOpen((v) => !v)}
+        onClick={() => setIsOpen((prev) => !prev)}
       >
-        <i className={`bi bi-chevron-${isOpen ? "down" : "up"}`}></i>
+        <i className={`bi bi-chevron-${isOpen ? "down" : "up"}`} style={{ fontSize: "20px" }}></i>
       </button>
 
-      {/* Slide-up panel */}
+      {/* Панель налаштувань */}
       <div
         className="position-fixed w-100 bg-light border-top border-success border-3"
         style={{
           bottom: isOpen ? "60px" : "-500px",
-          transition: "bottom 0.25s ease",
+          transition: "bottom 0.3s ease-in-out",
           zIndex: 1099,
           boxShadow: "0 -4px 16px rgba(0,0,0,0.2)",
+          maxHeight: "400px",
+          overflowY: "auto",
         }}
       >
-        <div className="p-3">
+        <div className="container-fluid p-3">
           <Form onSubmit={handleSubmit}>
-            <div className="row g-2 align-items-end">
-              {/* Промпт маршруту - переміщено на верх */}
+            <div className="row g-3">
+              {/* Промпт маршруту */}
               <div className="col-12">
-                <Form.Label className="small mb-1">
-                  <i className="bi bi-chat-dots"></i> Промпт маршруту
+                <Form.Label className="small fw-semibold mb-1">
+                  <i className="bi bi-chat-dots me-1"></i>
+                  Промпт маршруту <span className="text-muted fw-normal">(необов'язково)</span>
                 </Form.Label>
                 <Form.Control
                   as="textarea"
                   rows={2}
-                  placeholder="Напр.: Прогулянка на 2 години через парк з кав'ярнею"
+                  placeholder="Наприклад: Прогулянка на 2 години через парк з кав'ярнею"
                   value={prompt}
                   onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
                     setPrompt(e.target.value)
@@ -118,14 +128,15 @@ const WalkPreferencesBar: React.FC<WalkPreferencesProps> = ({
                   style={{ resize: "none" }}
                 />
                 <Form.Text className="text-muted small">
-                  Додаткові умови: місця та час нижче
+                  Опишіть бажану прогулянку своїми словами
                 </Form.Text>
               </div>
 
-              {/* Місця для відвідування - тепер необов'язкові */}
+              {/* Місця для відвідування */}
               <div className="col-12 col-md-6">
-                <Form.Label className="small mb-1">
-                  <i className="bi bi-geo-alt"></i> Місця для відвідування
+                <Form.Label className="small fw-semibold mb-1">
+                  <i className="bi bi-geo-alt me-1"></i>
+                  Місця для відвідування <span className="text-muted fw-normal">(необов'язково)</span>
                 </Form.Label>
                 <InputGroup>
                   <Form.Control
@@ -139,8 +150,9 @@ const WalkPreferencesBar: React.FC<WalkPreferencesProps> = ({
                     variant="outline-success"
                     onClick={addLocation}
                     type="button"
+                    disabled={!locationInput.trim()}
                   >
-                    <i className="bi bi-plus"></i>
+                    <i className="bi bi-plus-lg"></i>
                   </Button>
                 </InputGroup>
                 {locations.length > 0 && (
@@ -149,25 +161,30 @@ const WalkPreferencesBar: React.FC<WalkPreferencesProps> = ({
                       <span
                         key={idx}
                         className="badge bg-success d-inline-flex align-items-center gap-1"
+                        style={{ fontSize: "0.85rem" }}
                       >
                         {loc}
                         <button
                           type="button"
                           className="btn-close btn-close-white"
-                          style={{ fontSize: "0.7em" }}
+                          style={{ fontSize: "0.6em" }}
                           onClick={() => removeLocation(idx)}
-                          aria-label="Remove"
+                          aria-label="Видалити"
                         ></button>
                       </span>
                     ))}
                   </div>
                 )}
+                <Form.Text className="text-muted small">
+                  Додайте типи місць, які хочете відвідати
+                </Form.Text>
               </div>
 
-              {/* Відстань - тепер необов'язкова */}
+              {/* Відстань */}
               <div className="col-12 col-md-3">
-                <Form.Label className="small mb-1">
-                  <i className="bi bi-arrows-angle-expand"></i> Відстань (км) <span className="text-muted">(необов'язково)</span>
+                <Form.Label className="small fw-semibold mb-1">
+                  <i className="bi bi-arrows-angle-expand me-1"></i>
+                  Відстань (км) <span className="text-muted fw-normal">(необов'язково)</span>
                 </Form.Label>
                 <Form.Control
                   type="number"
@@ -175,7 +192,9 @@ const WalkPreferencesBar: React.FC<WalkPreferencesProps> = ({
                   max="50"
                   step="0.5"
                   value={distanceKm || ""}
-                  onChange={(e) => setDistanceKm(e.target.value ? Number(e.target.value) : undefined)}
+                  onChange={(e) =>
+                    setDistanceKm(e.target.value ? Number(e.target.value) : undefined)
+                  }
                   placeholder="Автоматично"
                 />
                 <Form.Text className="text-muted small">
@@ -185,11 +204,15 @@ const WalkPreferencesBar: React.FC<WalkPreferencesProps> = ({
 
               {/* Кнопка генерації */}
               <div className="col-12 col-md-3">
+                <Form.Label className="small fw-semibold mb-1 d-block" style={{ visibility: "hidden" }}>
+                  Генерація
+                </Form.Label>
                 <Button
                   variant="success"
                   type="submit"
                   className="w-100"
                   disabled={isGenerating}
+                  style={{ minHeight: "38px" }}
                 >
                   {isGenerating ? (
                     <>
@@ -202,7 +225,8 @@ const WalkPreferencesBar: React.FC<WalkPreferencesProps> = ({
                     </>
                   ) : (
                     <>
-                      <i className="bi bi-route"></i> Згенерувати
+                      <i className="bi bi-route me-2"></i>
+                      Згенерувати
                     </>
                   )}
                 </Button>
@@ -210,6 +234,7 @@ const WalkPreferencesBar: React.FC<WalkPreferencesProps> = ({
             </div>
           </Form>
 
+          {/* Підсумок маршруту */}
           {routeSummary && (
             <div className="mt-3 p-2 bg-white border rounded small text-secondary">
               <i className="bi bi-info-circle me-1"></i>
@@ -223,5 +248,3 @@ const WalkPreferencesBar: React.FC<WalkPreferencesProps> = ({
 };
 
 export default WalkPreferencesBar;
-
-

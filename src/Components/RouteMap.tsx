@@ -322,7 +322,7 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
           }
 
           // Якщо є промпт, спробувати витягти з нього інформацію
-          if (hasPrompt) {
+          if (hasPrompt && preferences.prompt) {
             // Простий парсинг промпту для пошуку ключових слів
             const promptLower = preferences.prompt.toLowerCase();
             const keywords = ["кафе", "cafe", "парк", "park", "магазин", "shop", "ресторан", "restaurant", "музей", "museum"];
