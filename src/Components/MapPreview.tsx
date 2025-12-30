@@ -1,6 +1,8 @@
 import React, { useEffect, useRef } from "react";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
+import mapboxgl from "mapbox-gl";
+import "mapbox-gl/dist/mapbox-gl.css";
+
+const MAPBOX_TOKEN = "pk.eyJ1IjoiaGFsbGV5cy1jb21ldCIsImEiOiJjbWpzcmc0dzQ0NHZ1M2dxeDRyOTFtNHFxIn0.gCWJwF521jdHqD38Nn8ZsA";
 
 interface MapPreviewProps {
   points?: [number, number][];
@@ -14,7 +16,7 @@ const MapPreview: React.FC<MapPreviewProps> = ({
   height = 200,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<L.Map | null>(null);
+  const mapRef = useRef<mapboxgl.Map | null>(null);
 
   useEffect(() => {
     if (!containerRef.current || !points || points.length < 2) {
@@ -28,60 +30,75 @@ const MapPreview: React.FC<MapPreviewProps> = ({
     }
 
     // Створити нову карту
-    const map = L.map(containerRef.current, {
+    const map = new mapboxgl.Map({
+      container: containerRef.current,
+      accessToken: MAPBOX_TOKEN,
+      style: "mapbox://styles/mapbox/streets-v12",
+      center: [points[0][1], points[0][0]], // [lng, lat]
       zoom: 13,
-      center: [points[0][0], points[0][1]],
-      zoomControl: false,
-      scrollWheelZoom: false,
-      dragging: false,
-      doubleClickZoom: false,
-      touchZoom: false,
-      boxZoom: false,
-      keyboard: false,
+      interactive: false,
     });
 
     mapRef.current = map;
 
-    // Додати tile layer
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution: "&copy; OpenStreetMap",
-      maxZoom: 19,
-    }).addTo(map);
+    map.on("load", () => {
+      // Конвертувати points в формат для Mapbox [lng, lat]
+      const coordinates = points.map((p) => [p[1], p[0]] as [number, number]);
 
-    // Конвертувати points в LatLngTuple для leaflet
-    const latLngs = points.map((p) => [p[0], p[1]] as L.LatLngTuple);
+      // Додати джерело даних для маршруту
+      map.addSource("route", {
+        type: "geojson",
+        data: {
+          type: "Feature",
+          geometry: {
+            type: "LineString",
+            coordinates: coordinates,
+          },
+          properties: {},
+        },
+      });
 
-    // Додати маршрут як поліліню
-    const polyline = L.polyline(latLngs, {
-      color: isPublic ? "#28a745" : "#6c757d",
-      weight: 3,
-      opacity: 0.8,
-      lineCap: "round",
-      lineJoin: "round",
-    }).addTo(map);
+      // Додати шар для лінії маршруту
+      map.addLayer({
+        id: "route-line",
+        type: "line",
+        source: "route",
+        layout: {
+          "line-join": "round",
+          "line-cap": "round",
+        },
+        paint: {
+          "line-color": isPublic ? "#28a745" : "#6c757d",
+          "line-width": 3,
+          "line-opacity": 0.8,
+        },
+      });
 
-    // Додати маркери на початку та кінці
-    L.circleMarker(latLngs[0], {
-      radius: 5,
-      fillColor: "#28a745",
-      color: "#fff",
-      weight: 2,
-      opacity: 1,
-      fillOpacity: 0.8,
-    }).addTo(map);
+      // Додати маркери на початку та кінці
+      new mapboxgl.Marker({
+        color: "#28a745",
+        scale: 0.8,
+      })
+        .setLngLat([points[0][1], points[0][0]])
+        .addTo(map);
 
-    L.circleMarker(latLngs[latLngs.length - 1], {
-      radius: 5,
-      fillColor: "#dc3545",
-      color: "#fff",
-      weight: 2,
-      opacity: 1,
-      fillOpacity: 0.8,
-    }).addTo(map);
+      new mapboxgl.Marker({
+        color: "#dc3545",
+        scale: 0.8,
+      })
+        .setLngLat([
+          points[points.length - 1][1],
+          points[points.length - 1][0],
+        ])
+        .addTo(map);
 
-    // Вписати карту в межі маршруту
-    const bounds = polyline.getBounds();
-    map.fitBounds(bounds, { padding: [10, 10] });
+      // Вписати карту в межі маршруту
+      const bounds = new mapboxgl.LngLatBounds();
+      coordinates.forEach((coord) => {
+        bounds.extend(coord as [number, number]);
+      });
+      map.fitBounds(bounds, { padding: 10 });
+    });
 
     return () => {
       if (mapRef.current) {
