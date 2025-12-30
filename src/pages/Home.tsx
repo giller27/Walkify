@@ -17,6 +17,8 @@ function Home() {
   const [routeSummary, setRouteSummary] = useState("");
   const [loadedRoute, setLoadedRoute] = useState<WalkPreferences | null>(null);
   const [userInfo, setUserInfo] = useState<GoogleUser | null>(null);
+  const [isPanelExpanded, setIsPanelExpanded] = useState(true); // Стан панелі
+  const [hasRoute, setHasRoute] = useState(false); // Стан наявності маршруту
 
   // Завантажити інформацію користувача
   useEffect(() => {
@@ -82,12 +84,68 @@ function Home() {
     }
   };
 
+  const handleSaveRoute = async () => {
+    if (!routeMapRef.current || !user) {
+      alert("Будь ласка, авторизуйтеся");
+      return;
+    }
+
+    try {
+      const currentRoute = routeMapRef.current.getCurrentRoute();
+      if (!currentRoute || currentRoute.points.length === 0) {
+        alert("Немає маршруту для збереження");
+        return;
+      }
+
+      const routeName = prompt("Введіть назву маршруту:", "Мій маршрут");
+      if (!routeName) return;
+
+      // Подготовуємо дані для збереження
+      const saveData: any = {
+        user_id: user.id,
+        name: routeName,
+        description:
+          currentRoute.locations.join(", ") || "Згенерований маршрут",
+        points: currentRoute.points,
+        waypoints: currentRoute.waypoints,
+        statistics: {
+          distanceKm: currentRoute.distanceKm,
+          estimatedTimeMinutes: currentRoute.estimatedTimeMinutes,
+        },
+        preferences: {
+          locations: currentRoute.locations,
+        },
+      };
+
+      // Викликаємо функцію збереження з supabaseService
+      const { saveRoute } = await import("../services/supabaseService");
+      await saveRoute(saveData);
+
+      alert("Маршрут успішно збережено!");
+    } catch (error) {
+      console.error("Помилка при збереженні маршруту:", error);
+      alert(
+        "Помилка при збереженні: " +
+          (error instanceof Error ? error.message : String(error))
+      );
+    }
+  };
+
+  const handleClearRoute = () => {
+    if (routeMapRef.current) {
+      routeMapRef.current.clearCurrentRoute();
+      setHasRoute(false); // Позначити, що маршруту немає
+      setRouteSummary(""); // Очистити зведення маршруту
+    }
+  };
+
   const handleRouteGenerated = async (data: {
     distanceKm: number;
     locations: string[];
     prompt?: string;
     estimatedTimeMinutes: number;
   }) => {
+    setHasRoute(true); // Позначити, що маршрут є
     // Зберегти статистику в Supabase, якщо користувач авторизований
     if (user) {
       try {
@@ -155,6 +213,7 @@ function Home() {
         ref={routeMapRef}
         onRouteSummary={setRouteSummary}
         onRouteGenerated={handleRouteGenerated}
+        panelExpanded={isPanelExpanded}
       />
       <WalkPreferencesBar
         onGenerate={handleGenerate}
@@ -162,6 +221,11 @@ function Home() {
         routeSummary={routeSummary}
         onRequestGeolocation={handleRequestGeolocation}
         initialPreferences={loadedRoute || undefined}
+        isExpanded={isPanelExpanded}
+        onToggleExpand={() => setIsPanelExpanded(!isPanelExpanded)}
+        onSaveRoute={handleSaveRoute}
+        onClearRoute={handleClearRoute}
+        hasRoute={hasRoute}
       />
     </>
   );

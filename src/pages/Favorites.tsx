@@ -22,11 +22,12 @@ function Favorites() {
   const [favoriteRoutes, setFavoriteRoutes] = useState<RouteItem[]>([]);
   const [publicRoutes, setPublicRoutes] = useState<RouteItem[]>([]);
   const [myPublishedRoutes, setMyPublishedRoutes] = useState<RouteItem[]>([]);
+  const [myRoutes, setMyRoutes] = useState<RouteItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<
-    "favorites" | "public" | "myPublished"
-  >("favorites");
+    "favorites" | "public" | "myPublished" | "myRoutes"
+  >("myRoutes");
   const [publishing, setPublishing] = useState(false);
 
   // Завантажити улюблені маршрути
@@ -93,6 +94,28 @@ function Favorites() {
     loadMyPublished();
   }, [user]);
 
+  // Завантажити всі мої маршрути
+  useEffect(() => {
+    if (!user) return;
+
+    const loadMyRoutes = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const routes = await supabaseModules.getUserRoutes(user.id);
+        setMyRoutes(routes as unknown as RouteItem[]);
+      } catch (err) {
+        console.error("Error loading my routes:", err);
+        setError("Помилка завантаження моїх маршрутів");
+        setMyRoutes([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadMyRoutes();
+  }, [user]);
+
   const handleRemoveFavorite = async (routeId: string) => {
     if (!user) return;
     try {
@@ -156,6 +179,31 @@ function Favorites() {
     }
   };
 
+  const handleDeleteRoute = async (routeId: string) => {
+    if (!window.confirm("Ви впевнені, що хочете видалити цей маршрут?")) {
+      return;
+    }
+
+    try {
+      setPublishing(true);
+      await supabaseModules.deleteRoute(routeId);
+      // Оновити список маршрутів
+      const routes = await supabaseModules.getUserRoutes(user!.id);
+      setMyRoutes(routes as unknown as RouteItem[]);
+      setError(null);
+      // Успішно видалено
+      setTimeout(() => {
+        alert("Маршрут успішно видалено");
+      }, 500);
+    } catch (err) {
+      console.error("Error deleting route:", err);
+      setError("Помилка при видаленні маршруту");
+      setTimeout(() => setError(null), 3000);
+    } finally {
+      setPublishing(false);
+    }
+  };
+
   const handleViewRoute = (route: RouteItem) => {
     // Зберегти маршрут для перегляду
     if (route.points && Array.isArray(route.points)) {
@@ -176,7 +224,8 @@ function Favorites() {
   const renderRouteCard = (
     route: RouteItem,
     isFavorite: boolean,
-    isMyPublished: boolean = false
+    isMyPublished: boolean = false,
+    isMyRoute: boolean = false
   ) => (
     <Col md={4} sm={6} xs={12} key={route.id} className="mb-3">
       <Card className="h-100 shadow-sm">
@@ -285,6 +334,33 @@ function Favorites() {
                 <i className="bi bi-heart"></i> Улюблені
               </Button>
             )}
+
+            {isMyRoute && (
+              <Button
+                variant="outline-danger"
+                size="sm"
+                onClick={() => handleDeleteRoute(route.id)}
+                disabled={publishing}
+              >
+                {publishing ? (
+                  <>
+                    <Spinner
+                      as="span"
+                      animation="border"
+                      size="sm"
+                      role="status"
+                      aria-hidden="true"
+                      className="me-2"
+                    />
+                    Видалення...
+                  </>
+                ) : (
+                  <>
+                    <i className="bi bi-trash"></i> Видалити
+                  </>
+                )}
+              </Button>
+            )}
           </div>
         </Card.Body>
       </Card>
@@ -315,6 +391,17 @@ function Favorites() {
       {error && <Alert variant="danger">{error}</Alert>}
 
       <Nav variant="tabs" className="mb-4">
+        {user && (
+          <Nav.Item>
+            <Nav.Link
+              active={activeTab === "myRoutes"}
+              onClick={() => setActiveTab("myRoutes")}
+            >
+              <i className="bi bi-bookmark me-2"></i>
+              Мої маршрути ({myRoutes.length})
+            </Nav.Link>
+          </Nav.Item>
+        )}
         <Nav.Item>
           <Nav.Link
             active={activeTab === "favorites"}
@@ -350,6 +437,21 @@ function Favorites() {
         <div className="text-center">
           <Spinner animation="border" variant="success" />
         </div>
+      ) : activeTab === "myRoutes" ? (
+        <>
+          {myRoutes.length === 0 ? (
+            <Alert variant="info">
+              <i className="bi bi-info-circle me-2"></i>У вас поки немає
+              збережених маршрутів.
+            </Alert>
+          ) : (
+            <Row>
+              {myRoutes.map((route) =>
+                renderRouteCard(route, false, false, true)
+              )}
+            </Row>
+          )}
+        </>
       ) : activeTab === "favorites" ? (
         <>
           {favoriteRoutes.length === 0 ? (
