@@ -268,7 +268,7 @@ function Statistic() {
 
           <Row className="g-3">
             {/* Статистика по днях тижня */}
-            <Col xs={12} md={6}>
+            <Col xs={12} md={4}>
               <Card className="h-100">
                 <Card.Header className="bg-success text-white">
                   <h5 className="mb-0">
@@ -301,7 +301,7 @@ function Statistic() {
             </Col>
 
             {/* Топ дні по відстані */}
-            <Col xs={12} md={6}>
+            <Col xs={12} md={4}>
               <Card className="h-100">
                 <Card.Header className="bg-success text-white">
                   <h5 className="mb-0">
@@ -344,7 +344,7 @@ function Statistic() {
             </Col>
 
             {/* Останні прогулянки */}
-            <Col xs={12}>
+            <Col xs={12} md={4}>
               <Card>
                 <Card.Header className="bg-success text-white">
                   <h5 className="mb-0">
