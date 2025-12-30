@@ -66,6 +66,7 @@ export function parseRouteRequest(text: string): {
   destinationName: string | null; // Конкретна назва будівлі/місця
   waypointTypes: string[];
   waypointNames: string[]; // Конкретні назви проміжних точок
+  targetDistance?: number; // Бажана відстань маршруту в км
 } {
   const lowerText = text.toLowerCase();
   let destinationType: string | null = null;
@@ -304,113 +305,215 @@ export function parseRouteRequest(text: string): {
     }
   }
 
-  return { destinationType, destinationName, waypointTypes, waypointNames };
+  // Парсимо відстань з тексту (наприклад, "5км", "5 км", "5km", "5 km")
+  let targetDistance: number | undefined = undefined;
+  const distancePatterns = [
+    /(\d+(?:[.,]\d+)?)\s*км/gi,
+    /(\d+(?:[.,]\d+)?)\s*km/gi,
+    /(\d+(?:[.,]\d+)?)\s*кілометр/gi,
+    /(\d+(?:[.,]\d+)?)\s*kilometer/gi,
+  ];
+  
+  for (const pattern of distancePatterns) {
+    const match = text.match(pattern);
+    if (match) {
+      const distanceStr = match[1].replace(',', '.');
+      const distance = parseFloat(distanceStr);
+      if (!isNaN(distance) && distance > 0) {
+        targetDistance = distance;
+        break;
+      }
+    }
+  }
+
+  return { destinationType, destinationName, waypointTypes, waypointNames, targetDistance };
+}
+
+/**
+ * Генерує варіанти назви в різних відмінках для пошуку
+ */
+function generateNameVariants(name: string): string[] {
+  const variants: string[] = [name]; // Додаємо оригінальну назву
+  
+  const lower = name.toLowerCase().trim();
+  
+  // Якщо назва містить прикметник + іменник (наприклад, "західний автовокзал")
+  const words = lower.split(/\s+/);
+  if (words.length === 2) {
+    const [adjective, noun] = words;
+    
+    // Варіанти прикметника в різних відмінках (чоловічий рід)
+    if (adjective.endsWith('ий') || adjective.endsWith('ій')) {
+      const stem = adjective.slice(0, -2);
+      const adjVariants = [
+        adjective,        // називний: західний
+        stem + 'ого',     // родовий: західного
+        stem + 'ому',     // давальний: західному
+        stem + 'им',      // орудний: західним
+      ];
+      
+      // Варіанти іменника в різних відмінках (чоловічий рід)
+      if (noun.endsWith('л') || noun.endsWith('ль') || noun.endsWith('нь') || noun.endsWith('ал')) {
+        const nounVariants = [
+          noun,           // називний: автовокзал
+          noun + 'у',     // родовий/давальний: автовокзалу
+          noun + 'ом',    // орудний: автовокзалом
+          noun + 'і',     // місцевий: автовокзалі
+        ];
+        
+        // Комбінуємо варіанти
+        for (const adj of adjVariants) {
+          for (const n of nounVariants) {
+            variants.push(`${adj} ${n}`);
+          }
+        }
+      }
+    }
+  } else if (words.length === 1) {
+    // Одне слово
+    const word = words[0];
+    if (word.endsWith('л') || word.endsWith('ль') || word.endsWith('нь') || word.endsWith('ал')) {
+      variants.push(
+        word + 'у',
+        word + 'ом',
+        word + 'і',
+        word + 'а'
+      );
+    } else if (word.endsWith('а') || word.endsWith('я')) {
+      const stem = word.slice(0, -1);
+      variants.push(
+        stem + 'и',
+        stem + 'ею',
+        stem + 'і',
+        stem + 'у'
+      );
+    }
+  }
+  
+  // Видаляємо дублікати та повертаємо унікальні варіанти
+  return [...new Set(variants)];
 }
 
 /**
  * Пошук конкретної будівлі/місця за назвою через геокодування
+ * Спробує кілька варіантів назви в різних відмінках
  */
 export async function findPlaceByName(
   placeName: string,
   userLocation: [number, number] // [lng, lat]
 ): Promise<Place | null> {
-  try {
-    // Спочатку спробуємо через Nominatim
-    const nominatimUrl = `https://nominatim.openstreetmap.org/search?` +
-      `q=${encodeURIComponent(placeName)}&` +
-      `format=json&` +
-      `limit=5&` +
-      `bounded=1&` +
-      `viewbox=${userLocation[0] - 0.1},${userLocation[1] - 0.1},${userLocation[0] + 0.1},${userLocation[1] + 0.1}&` +
-      `addressdetails=1`;
-    
+  // Генеруємо варіанти назви в різних відмінках
+  const nameVariants = generateNameVariants(placeName);
+  
+  // Функція для пошуку за конкретною назвою
+  const searchWithName = async (name: string): Promise<Place | null> => {
     try {
-      const nominatimResponse = await fetch(nominatimUrl, {
-        headers: {
-          'User-Agent': 'WalkifyApp/1.0'
-        }
-      });
+      // Спочатку спробуємо через Nominatim
+      const nominatimUrl = `https://nominatim.openstreetmap.org/search?` +
+        `q=${encodeURIComponent(name)}&` +
+        `format=json&` +
+        `limit=5&` +
+        `bounded=1&` +
+        `viewbox=${userLocation[0] - 0.1},${userLocation[1] - 0.1},${userLocation[0] + 0.1},${userLocation[1] + 0.1}&` +
+        `addressdetails=1`;
       
-      if (nominatimResponse.ok) {
-        const nominatimData = await nominatimResponse.json();
+      try {
+        const nominatimResponse = await fetch(nominatimUrl, {
+          headers: {
+            'User-Agent': 'WalkifyApp/1.0'
+          }
+        });
         
-        if (nominatimData && nominatimData.length > 0) {
-          // Обчислюємо відстань до кожного місця і вибираємо найближче
-          let nearestPlace: Place | null = null;
-          let minDistance = Infinity;
+        if (nominatimResponse.ok) {
+          const nominatimData = await nominatimResponse.json();
+          
+          if (nominatimData && nominatimData.length > 0) {
+            // Обчислюємо відстань до кожного місця і вибираємо найближче
+            let nearestPlace: Place | null = null;
+            let minDistance = Infinity;
 
-          for (const item of nominatimData) {
-            const lng = parseFloat(item.lon);
-            const lat = parseFloat(item.lat);
-            const distance = calculateDistance(
-              userLocation[1], userLocation[0],
-              lat, lng
-            );
+            for (const item of nominatimData) {
+              const lng = parseFloat(item.lon);
+              const lat = parseFloat(item.lat);
+              const distance = calculateDistance(
+                userLocation[1], userLocation[0],
+                lat, lng
+              );
 
-            if (distance < minDistance && distance <= 50) { // в межах 50 км
-              minDistance = distance;
-              nearestPlace = {
-                name: item.display_name.split(',')[0] || item.name || placeName,
-                coordinates: [lng, lat],
-                type: 'custom',
-                address: item.display_name,
-              };
+              if (distance < minDistance && distance <= 50) { // в межах 50 км
+                minDistance = distance;
+                nearestPlace = {
+                  name: item.display_name.split(',')[0] || item.name || placeName,
+                  coordinates: [lng, lat],
+                  type: 'custom',
+                  address: item.display_name,
+                };
+              }
+            }
+
+            if (nearestPlace) {
+              return nearestPlace;
             }
           }
+        }
+      } catch (nominatimError) {
+        // Продовжуємо до Mapbox
+      }
 
-          if (nearestPlace) {
-            return nearestPlace;
-          }
+      // Якщо Nominatim не спрацював, використовуємо Mapbox Geocoding API
+      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(name)}.json?` +
+        `proximity=${userLocation[0]},${userLocation[1]}&` +
+        `limit=5&` +
+        `access_token=${MAPBOX_TOKEN}`;
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        return null;
+      }
+
+      const data = await response.json();
+      
+      if (!data.features || data.features.length === 0) {
+        return null;
+      }
+
+      // Обчислюємо відстань до кожного місця і вибираємо найближче
+      let nearestPlace: Place | null = null;
+      let minDistance = Infinity;
+
+      for (const feature of data.features) {
+        const [lng, lat] = feature.center as [number, number];
+        const distance = calculateDistance(
+          userLocation[1], userLocation[0],
+          lat, lng
+        );
+
+        if (distance < minDistance && distance <= 50) { // в межах 50 км
+          minDistance = distance;
+          nearestPlace = {
+            name: feature.text || feature.place_name || placeName,
+            coordinates: [lng, lat],
+            type: 'custom',
+            address: feature.place_name,
+          };
         }
       }
-    } catch (nominatimError) {
-      console.log('Nominatim search failed, trying Mapbox...', nominatimError);
-    }
 
-    // Якщо Nominatim не спрацював, використовуємо Mapbox Geocoding API
-    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(placeName)}.json?` +
-      `proximity=${userLocation[0]},${userLocation[1]}&` +
-      `limit=5&` +
-      `access_token=${MAPBOX_TOKEN}`;
-
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error('Failed to search place by name');
-    }
-
-    const data = await response.json();
-    
-    if (!data.features || data.features.length === 0) {
+      return nearestPlace;
+    } catch (error) {
       return null;
     }
-
-    // Обчислюємо відстань до кожного місця і вибираємо найближче
-    let nearestPlace: Place | null = null;
-    let minDistance = Infinity;
-
-    for (const feature of data.features) {
-      const [lng, lat] = feature.center as [number, number];
-      const distance = calculateDistance(
-        userLocation[1], userLocation[0],
-        lat, lng
-      );
-
-      if (distance < minDistance && distance <= 50) { // в межах 50 км
-        minDistance = distance;
-        nearestPlace = {
-          name: feature.text || feature.place_name || placeName,
-          coordinates: [lng, lat],
-          type: 'custom',
-          address: feature.place_name,
-        };
-      }
+  };
+  
+  // Спробуємо кожен варіант назви
+  for (const variant of nameVariants) {
+    const result = await searchWithName(variant);
+    if (result) {
+      return result;
     }
-
-    return nearestPlace;
-  } catch (error) {
-    console.error('Error finding place by name:', error);
-    return null;
   }
+  
+  return null;
 }
 
 /**
@@ -649,13 +752,156 @@ export async function buildRoute(
 }
 
 /**
+ * Подовжує маршрут до потрібної відстані, додаючи точки інтересу
+ */
+async function extendRouteToDistance(
+  initialRoute: RouteResult,
+  targetDistanceKm: number,
+  userLocation: [number, number], // [lng, lat]
+  destination: [number, number] // [lng, lat]
+): Promise<RouteResult> {
+  const currentDistance = initialRoute.distanceKm;
+  
+  if (currentDistance >= targetDistanceKm) {
+    return initialRoute; // Маршрут вже достатньо довгий
+  }
+  
+  const neededDistance = targetDistanceKm - currentDistance;
+  const additionalWaypoints: [number, number][] = [];
+  const additionalWaypointPlaces: Place[] = [];
+  
+  // Типи місць для додавання до маршруту
+  const interestTypes = ['park', 'cafe', 'museum', 'library', 'place_of_worship'];
+  
+  // Спробуємо додати точки інтересу, щоб подовжити маршрут
+  // Використовуємо сегменти маршруту для пошуку точок поблизу
+  const routePoints = initialRoute.points;
+  const segmentCount = Math.min(5, Math.floor(routePoints.length / 10)); // Розбиваємо на сегменти
+  
+  for (let i = 0; i < segmentCount && additionalWaypoints.length < 3; i++) {
+    const segmentIndex = Math.floor((i + 1) * routePoints.length / (segmentCount + 1));
+    if (segmentIndex >= routePoints.length) continue;
+    
+    const [lat, lng] = routePoints[segmentIndex];
+    const segmentPoint: [number, number] = [lng, lat];
+    
+    // Шукаємо точку інтересу поблизу цього сегменту
+    const interestType = interestTypes[i % interestTypes.length];
+    const place = await findNearestPlace(segmentPoint, interestType, 1000);
+    
+    if (place && !additionalWaypointPlaces.some(p => 
+      Math.abs(p.coordinates[0] - place.coordinates[0]) < 0.001 &&
+      Math.abs(p.coordinates[1] - place.coordinates[1]) < 0.001
+    )) {
+      additionalWaypoints.push(place.coordinates);
+      additionalWaypointPlaces.push(place);
+    }
+  }
+  
+  // Якщо знайшли додаткові точки, будуємо новий маршрут
+  if (additionalWaypoints.length > 0) {
+    // Додаємо додаткові точки до існуючих проміжних точок
+    const allWaypoints = [
+      ...initialRoute.waypoints.map(wp => [wp.location[1], wp.location[0]] as [number, number]),
+      ...additionalWaypoints
+    ];
+    
+    const extendedRoute = await buildRoute(userLocation, destination, allWaypoints);
+    
+    // Якщо новий маршрут все ще коротший, спробуємо додати ще точки
+    if (extendedRoute.distanceKm < targetDistanceKm && extendedRoute.distanceKm < currentDistance * 1.5) {
+      // Додаємо точки інтересу ближче до кінця маршруту
+      const endSegmentIndex = Math.floor(routePoints.length * 0.7);
+      if (endSegmentIndex < routePoints.length) {
+        const [lat, lng] = routePoints[endSegmentIndex];
+        const endSegmentPoint: [number, number] = [lng, lat];
+        
+        const endPlace = await findNearestPlace(endSegmentPoint, 'park', 1500);
+        if (endPlace && !additionalWaypointPlaces.some(p => 
+          Math.abs(p.coordinates[0] - endPlace.coordinates[0]) < 0.001 &&
+          Math.abs(p.coordinates[1] - endPlace.coordinates[1]) < 0.001
+        )) {
+          allWaypoints.push(endPlace.coordinates);
+          const finalRoute = await buildRoute(userLocation, destination, allWaypoints);
+          
+          // Оновлюємо waypoints з правильними назвами
+          finalRoute.waypoints = [
+            ...initialRoute.waypoints,
+            ...additionalWaypointPlaces.map(wp => ({
+              location: [wp.coordinates[1], wp.coordinates[0]] as [number, number],
+              name: wp.name,
+              type: (wp.type === 'cafe' ? 'cafe' : 
+                     wp.type === 'park' ? 'park' : 
+                     wp.type === 'shop' ? 'shop' : 'custom') as 'cafe' | 'park' | 'shop' | 'custom',
+            })),
+            {
+              location: [endPlace.coordinates[1], endPlace.coordinates[0]] as [number, number],
+              name: endPlace.name,
+              type: (endPlace.type === 'park' ? 'park' : 'custom') as 'cafe' | 'park' | 'shop' | 'custom',
+            }
+          ];
+          
+          finalRoute.locations = [
+            ...initialRoute.locations,
+            ...additionalWaypointPlaces.map(wp => wp.name),
+            endPlace.name
+          ];
+          
+          return finalRoute;
+        }
+      }
+      
+      // Оновлюємо waypoints з правильними назвами
+      extendedRoute.waypoints = [
+        ...initialRoute.waypoints,
+        ...additionalWaypointPlaces.map(wp => ({
+          location: [wp.coordinates[1], wp.coordinates[0]] as [number, number],
+          name: wp.name,
+          type: (wp.type === 'cafe' ? 'cafe' : 
+                 wp.type === 'park' ? 'park' : 
+                 wp.type === 'shop' ? 'shop' : 'custom') as 'cafe' | 'park' | 'shop' | 'custom',
+        }))
+      ];
+      
+      extendedRoute.locations = [
+        ...initialRoute.locations,
+        ...additionalWaypointPlaces.map(wp => wp.name)
+      ];
+      
+      return extendedRoute;
+    }
+    
+    // Оновлюємо waypoints з правильними назвами
+    extendedRoute.waypoints = [
+      ...initialRoute.waypoints,
+      ...additionalWaypointPlaces.map(wp => ({
+        location: [wp.coordinates[1], wp.coordinates[0]] as [number, number],
+        name: wp.name,
+        type: (wp.type === 'cafe' ? 'cafe' : 
+               wp.type === 'park' ? 'park' : 
+               wp.type === 'shop' ? 'shop' : 'custom') as 'cafe' | 'park' | 'shop' | 'custom',
+      }))
+    ];
+    
+    extendedRoute.locations = [
+      ...initialRoute.locations,
+      ...additionalWaypointPlaces.map(wp => wp.name)
+    ];
+    
+    return extendedRoute;
+  }
+  
+  return initialRoute; // Не вдалося подовжити
+}
+
+/**
  * Генерація маршруту на основі текстового запиту
  */
 export async function generateRouteFromText(
   userLocation: [number, number], // [lng, lat]
   text: string
 ): Promise<RouteResult> {
-  const { destinationType, destinationName, waypointTypes, waypointNames } = parseRouteRequest(text);
+  const { destinationType, destinationName, waypointTypes, waypointNames, targetDistance } = parseRouteRequest(text);
 
   // Якщо є конкретна назва, шукаємо її напряму
   let destination: Place | null = null;
@@ -706,7 +952,7 @@ export async function generateRouteFromText(
   }
 
   // Будуємо маршрут
-  const route = await buildRoute(userLocation, destination.coordinates, waypoints);
+  let route = await buildRoute(userLocation, destination.coordinates, waypoints);
 
   // Додаємо інформацію про локації
   route.locations = [
@@ -722,6 +968,11 @@ export async function generateRouteFromText(
            wp.type === 'park' ? 'park' : 
            wp.type === 'shop' ? 'shop' : 'custom') as 'cafe' | 'park' | 'shop' | 'custom',
   }));
+
+  // Якщо вказана цільова відстань і поточний маршрут коротший, подовжуємо його
+  if (targetDistance && route.distanceKm < targetDistance) {
+    route = await extendRouteToDistance(route, targetDistance, userLocation, destination.coordinates);
+  }
 
   return route;
 }
