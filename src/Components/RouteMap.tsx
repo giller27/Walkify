@@ -712,7 +712,7 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
         <button
           onClick={requestGeolocation}
           disabled={isLocating}
-          className="btn btn-primary"
+          className="btn btn-success"
           style={{
             position: "absolute",
             bottom: "100px",
@@ -721,7 +721,7 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
             width: "48px",
             height: "48px",
             borderRadius: "50%",
-            backgroundColor: isLocating ? "#6c757d" : "#007bff",
+            backgroundColor: isLocating ? "#6c757d" : "#670d29ff",
             border: "2px solid white",
             color: "white",
             display: "flex",
@@ -734,14 +734,14 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
           }}
           onMouseEnter={(e) => {
             if (!isLocating) {
-              e.currentTarget.style.backgroundColor = "#0056b3";
+              e.currentTarget.style.backgroundColor = "#277b43ff";
               e.currentTarget.style.transform = "scale(1.1)";
               e.currentTarget.style.boxShadow = "0 6px 16px rgba(0,0,0,0.5)";
             }
           }}
           onMouseLeave={(e) => {
             if (!isLocating) {
-              e.currentTarget.style.backgroundColor = "#007bff";
+              e.currentTarget.style.backgroundColor = "#0d9e4bff";
               e.currentTarget.style.transform = "scale(1)";
               e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,0,0,0.4)";
             }
