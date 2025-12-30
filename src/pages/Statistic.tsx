@@ -365,7 +365,7 @@ function Statistic() {
                 </Card.Header>
                 <Card.Body>
                   {filteredStatistics.length > 0 ? (
-                    filteredStatistics.slice(0, 10).map((stat) => (
+                    filteredStatistics.slice(0, 5).map((stat) => (
                       <div
                         key={stat.id}
                         className="d-flex justify-content-between align-items-center mb-3 pb-3 border-bottom"
