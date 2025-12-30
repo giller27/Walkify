@@ -192,7 +192,7 @@ function NavigationContent() {
                 <hr></hr>
                 <Nav.Link href="/home">Home</Nav.Link>
                 <hr></hr>
-                <Nav.Link href="/favs">Favorites</Nav.Link>
+                <Nav.Link href="/favs">Routes</Nav.Link>
                 <hr></hr>
                 <Nav.Link href="/stat">Statistic</Nav.Link>
                 <hr></hr>
@@ -236,7 +236,7 @@ function NavigationContent() {
         <Button className="btn btn-success text-center" href="/favs">
           <i className="bi bi-heart"></i>
           <br />
-          Favorites
+          Routes
         </Button>
         <Button className="btn btn-success text-center" href="/stat">
           <i className="bi bi-graph-up"></i>

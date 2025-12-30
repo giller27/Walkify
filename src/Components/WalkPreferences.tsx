@@ -71,7 +71,6 @@ const WalkPreferencesBar: React.FC<WalkPreferencesBarProps> = ({
     "прогулянка до музею",
     "прогулянка до озера",
     "прогулянка до ресторану",
-    "прогулянка до СкайПарку",
   ];
 
   return (
