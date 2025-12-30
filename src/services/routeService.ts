@@ -65,18 +65,90 @@ export function parseRouteRequest(text: string): {
   destinationType: string | null;
   destinationName: string | null; // Конкретна назва будівлі/місця
   waypointTypes: string[];
+  waypointNames: string[]; // Конкретні назви проміжних точок
 } {
   const lowerText = text.toLowerCase();
   let destinationType: string | null = null;
   let destinationName: string | null = null;
   const waypointTypes: string[] = [];
+  const waypointNames: string[] = [];
+
+  // Функція для перевірки, чи слово містить базову форму (враховуючи відмінки)
+  const containsBaseForm = (text: string, baseForm: string): boolean => {
+    const lowerText = text.toLowerCase();
+    const lowerBase = baseForm.toLowerCase();
+    
+    // Точне співпадіння
+    if (lowerText === lowerBase) return true;
+    
+    // Перевіряємо, чи текст містить базову форму
+    if (lowerText.includes(lowerBase)) return true;
+    
+    // Перевіряємо різні відмінки для базової форми
+    // Для іменників жіночого роду (закінчення на -а, -я)
+    if (lowerBase.endsWith('а') || lowerBase.endsWith('я')) {
+      const stem = lowerBase.slice(0, -1);
+      const variants = [
+        stem + 'и',   // родовий/давальний відмінок
+        stem + 'ею',  // орудний відмінок
+        stem + 'ю',   // знахідний відмінок
+        stem + 'ій',  // місцевий відмінок
+        stem + 'і',   // називний відмінок множини
+      ];
+      for (const variant of variants) {
+        if (lowerText.includes(variant) && variant.length >= 3) return true;
+      }
+    }
+    
+    // Для іменників чоловічого роду (закінчення на приголосний, -ль, -нь)
+    if (!lowerBase.endsWith('а') && !lowerBase.endsWith('я') && !lowerBase.endsWith('о') && !lowerBase.endsWith('е')) {
+      const variants = [
+        lowerBase + 'у',   // родовий/давальний відмінок
+        lowerBase + 'ом',  // орудний відмінок
+        lowerBase + 'і',   // місцевий відмінок
+        lowerBase + 'ів',  // родовий відмінок множини
+      ];
+      for (const variant of variants) {
+        if (lowerText.includes(variant) && variant.length >= 3) return true;
+      }
+    }
+    
+    // Для прикметників
+    if (lowerBase.endsWith('ий') || lowerBase.endsWith('а') || lowerBase.endsWith('е')) {
+      const stem = lowerBase.replace(/(ий|а|е)$/, '');
+      const variants = [
+        stem + 'ого',  // родовий відмінок
+        stem + 'им',   // орудний відмінок
+        stem + 'ому',  // давальний відмінок
+        stem + 'ій',   // місцевий відмінок
+        stem + 'ої',   // родовий відмінок жіночого роду
+        stem + 'ою',   // орудний відмінок жіночого роду
+      ];
+      for (const variant of variants) {
+        if (lowerText.includes(variant) && variant.length >= 3) return true;
+      }
+    }
+    
+    return false;
+  };
+
+  // Функція для перевірки, чи слово є типом місця
+  const isPlaceType = (word: string): boolean => {
+    for (const [key] of Object.entries(PLACE_TYPE_MAPPING)) {
+      if (containsBaseForm(word, key)) {
+        return true;
+      }
+    }
+    return false;
+  };
 
   // Спочатку перевіряємо, чи є конкретна назва після "до"
   // Патерни для витягування назви після "до" або "прогулянка до"
+  // Покращені патерни для кращого захоплення багатослівних назв
   const specificNamePatterns = [
-    /прогулянка\s+до\s+([А-Яа-яІіЇїЄєҐґA-Za-z0-9\s]+?)(?:\s+з|\s+через|$)/i,
-    /до\s+([А-Яа-яІіЇїЄєҐґA-Za-z0-9\s]+?)(?:\s+з|\s+через|$)/i,
-    /маршрут\s+до\s+([А-Яа-яІіЇїЄєҐґA-Za-z0-9\s]+?)(?:\s+з|\s+через|$)/i,
+    /прогулянка\s+до\s+([А-Яа-яІіЇїЄєҐґA-Za-z0-9][А-Яа-яІіЇїЄєҐґA-Za-z0-9\s]{2,}?)(?:\s+з|\s+через|$|\.|,)/i,
+    /до\s+([А-Яа-яІіЇїЄєҐґA-Za-z0-9][А-Яа-яІіЇїЄєҐґA-Za-z0-9\s]{2,}?)(?:\s+з|\s+через|$|\.|,)/i,
+    /маршрут\s+до\s+([А-Яа-яІіЇїЄєҐґA-Za-z0-9][А-Яа-яІіЇїЄєҐґA-Za-z0-9\s]{2,}?)(?:\s+з|\s+через|$|\.|,)/i,
   ];
 
   for (const pattern of specificNamePatterns) {
@@ -89,23 +161,23 @@ export function parseRouteRequest(text: string): {
       // Якщо назва містить пробіли або починається з великої літери - це швидше за все конкретна назва
       const hasSpaces = extractedName.includes(' ');
       const startsWithCapital = /^[А-ЯA-Z]/.test(extractedName);
-      const isLikelySpecificName = hasSpaces || startsWithCapital || extractedName.length > 10;
+      // Якщо назва містить прикметник + іменник (наприклад, "західний автовокзал")
+      const hasAdjectiveNoun = /^[А-Яа-яІіЇїЄєҐґA-Za-z]+\s+[А-Яа-яІіЇїЄєҐґA-Za-z]+/.test(extractedName);
+      const isLikelySpecificName = hasSpaces || startsWithCapital || extractedName.length > 10 || hasAdjectiveNoun;
       
-      let isPlaceType = false;
+      let isPlaceTypeCheck = false;
       if (!isLikelySpecificName) {
         // Перевіряємо тільки якщо не схоже на конкретну назву
-        for (const [key] of Object.entries(PLACE_TYPE_MAPPING)) {
-          // Точне співпадіння або якщо слово закінчується на тип місця (наприклад "парку" -> "парк")
-          if (lowerExtractedName === key || 
-              (lowerExtractedName.endsWith(key) && lowerExtractedName.length <= key.length + 3)) {
-            isPlaceType = true;
-            break;
-          }
-        }
+        isPlaceTypeCheck = isPlaceType(lowerExtractedName);
+      } else {
+        // Навіть якщо схоже на конкретну назву, перевіряємо чи це не просто тип місця
+        // Якщо це багатослівна фраза з прикметником, це швидше за все конкретна назва
+        const isJustPlaceType = !hasSpaces && !hasAdjectiveNoun && isPlaceType(lowerExtractedName);
+        isPlaceTypeCheck = isJustPlaceType;
       }
       
       // Якщо це не тип місця, а конкретна назва - зберігаємо її
-      if (!isPlaceType && extractedName.length > 2) {
+      if (!isPlaceTypeCheck && extractedName.length > 2) {
         destinationName = extractedName;
         break;
       }
@@ -126,7 +198,7 @@ export function parseRouteRequest(text: string): {
       for (const match of matches) {
         const word = match[1];
         for (const [key, value] of Object.entries(PLACE_TYPE_MAPPING)) {
-          if (word.includes(key) || key.includes(word)) {
+          if (containsBaseForm(word, key)) {
             if (!destinationType) {
               destinationType = value;
               break;
@@ -139,9 +211,57 @@ export function parseRouteRequest(text: string): {
     // Якщо не знайдено через патерни, шукаємо просто за ключовими словами
     if (!destinationType) {
       for (const [key, value] of Object.entries(PLACE_TYPE_MAPPING)) {
-        if (lowerText.includes(key) && !lowerText.includes(`з ${key}`) && !lowerText.includes(`через ${key}`)) {
+        if (containsBaseForm(lowerText, key) && 
+            !containsBaseForm(lowerText, `з ${key}`) && 
+            !containsBaseForm(lowerText, `через ${key}`)) {
           destinationType = value;
           break;
+        }
+      }
+    }
+  }
+
+  // Шукаємо конкретні назви проміжних точок після "через" або "з"
+  // Патерни для витягування конкретних назв після "через" або "з"
+  // Покращені патерни для кращого захоплення багатослівних назв
+  const waypointNamePatterns = [
+    /через\s+([А-Яа-яІіЇїЄєҐґA-Za-z0-9][А-Яа-яІіЇїЄєҐґA-Za-z0-9\s]{2,}?)(?:\s+до|\s+через|$|\.|,)/gi,
+    /з\s+([А-Яа-яІіЇїЄєҐґA-Za-z0-9][А-Яа-яІіЇїЄєҐґA-Za-z0-9\s]{2,}?)(?:\s+до|\s+через|$|\.|,)/gi,
+  ];
+
+  for (const pattern of waypointNamePatterns) {
+    const matches = text.matchAll(pattern);
+    for (const match of matches) {
+      if (match && match[1]) {
+        const extractedName = match[1].trim();
+        const lowerExtractedName = extractedName.toLowerCase();
+        
+        // Перевіряємо, чи це конкретна назва (містить пробіли, починається з великої літери, або довша за 10 символів)
+        const hasSpaces = extractedName.includes(' ');
+        const startsWithCapital = /^[А-ЯA-Z]/.test(extractedName);
+        // Якщо назва містить прикметник + іменник (наприклад, "сімейна пекарня", "західний автовокзал")
+        const hasAdjectiveNoun = /^[А-Яа-яІіЇїЄєҐґA-Za-z]+\s+[А-Яа-яІіЇїЄєҐґA-Za-z]+/.test(extractedName);
+        const isLikelySpecificName = hasSpaces || startsWithCapital || extractedName.length > 10 || hasAdjectiveNoun;
+        
+        // Перевіряємо, чи це не просто тип місця (наприклад, "пекарня" сама по собі)
+        // Якщо це багатослівна фраза з прикметником, це швидше за все конкретна назва
+        const isJustPlaceType = !hasSpaces && !hasAdjectiveNoun && isPlaceType(lowerExtractedName);
+        
+        // Якщо це схоже на конкретну назву і не є просто типом місця
+        if (isLikelySpecificName && !isJustPlaceType && extractedName.length > 2) {
+          if (!waypointNames.includes(extractedName)) {
+            waypointNames.push(extractedName);
+          }
+        } else if (!isLikelySpecificName) {
+          // Якщо це не схоже на конкретну назву, перевіряємо чи це тип місця
+          for (const [key, value] of Object.entries(PLACE_TYPE_MAPPING)) {
+            if (containsBaseForm(lowerExtractedName, key)) {
+              if (value !== destinationType && !waypointTypes.includes(value)) {
+                waypointTypes.push(value);
+              }
+              break;
+            }
+          }
         }
       }
     }
@@ -162,7 +282,7 @@ export function parseRouteRequest(text: string): {
     for (const match of matches) {
       const word = match[1] || match[0];
       for (const [key, value] of Object.entries(PLACE_TYPE_MAPPING)) {
-        if (word.includes(key) || key.includes(word) || 
+        if (containsBaseForm(word, key) || 
             (word.includes('кав') && value === 'cafe') ||
             (word.includes('парк') && value === 'park') ||
             (word.includes('магазин') && value === 'shop')) {
@@ -176,14 +296,15 @@ export function parseRouteRequest(text: string): {
 
   // Додаткова перевірка для явних згадок
   for (const [key, value] of Object.entries(PLACE_TYPE_MAPPING)) {
-    if (lowerText.includes(`з ${key}`) || lowerText.includes(`через ${key}`)) {
+    if ((containsBaseForm(lowerText, `з ${key}`) || containsBaseForm(lowerText, `через ${key}`)) ||
+        (lowerText.includes(`з ${key}`) || lowerText.includes(`через ${key}`))) {
       if (value !== destinationType && !waypointTypes.includes(value)) {
         waypointTypes.push(value);
       }
     }
   }
 
-  return { destinationType, destinationName, waypointTypes };
+  return { destinationType, destinationName, waypointTypes, waypointNames };
 }
 
 /**
@@ -534,7 +655,7 @@ export async function generateRouteFromText(
   userLocation: [number, number], // [lng, lat]
   text: string
 ): Promise<RouteResult> {
-  const { destinationType, destinationName, waypointTypes } = parseRouteRequest(text);
+  const { destinationType, destinationName, waypointTypes, waypointNames } = parseRouteRequest(text);
 
   // Якщо є конкретна назва, шукаємо її напряму
   let destination: Place | null = null;
@@ -558,15 +679,29 @@ export async function generateRouteFromText(
   const waypoints: [number, number][] = [];
   const waypointPlaces: Place[] = [];
 
-  for (const waypointType of waypointTypes) {
-    const waypoint = await findWaypointOnRoute(
-      userLocation,
-      destination.coordinates,
-      waypointType
-    );
+  // Спочатку шукаємо конкретні назви проміжних точок
+  for (const waypointName of waypointNames) {
+    const waypoint = await findPlaceByName(waypointName, userLocation);
     if (waypoint) {
       waypoints.push(waypoint.coordinates);
       waypointPlaces.push(waypoint);
+    }
+  }
+
+  // Потім шукаємо типи місць для проміжних точок
+  for (const waypointType of waypointTypes) {
+    // Перевіряємо, чи вже не додали місце цього типу
+    const alreadyAdded = waypointPlaces.some(wp => wp.type === waypointType);
+    if (!alreadyAdded) {
+      const waypoint = await findWaypointOnRoute(
+        userLocation,
+        destination.coordinates,
+        waypointType
+      );
+      if (waypoint) {
+        waypoints.push(waypoint.coordinates);
+        waypointPlaces.push(waypoint);
+      }
     }
   }
 
