@@ -1,49 +1,14 @@
 // src/Components/RouteMap.tsx
-import React, { useEffect, useRef, useState } from "react";
-import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
+import React, { useEffect, useRef, useState, useCallback } from "react";
+import Map, { Marker, Popup, Source, Layer } from "react-map-gl";
+import "mapbox-gl/dist/mapbox-gl.css";
 import { useAuth } from "../context/AuthContext";
 import * as supabaseModules from "../services/supabaseService";
+import type { MapRef } from "react-map-gl";
 
-delete (L.Icon.Default.prototype as any)._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl:
-    "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
-  iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-  shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
-});
-
-// Custom icon for user location with direction indicator (play button style)
-const createUserLocationIcon = (heading: number) => {
-  return L.divIcon({
-    className: "user-location-icon",
-    html: `
-      <div style="position: relative; width: 60px; height: 60px; display: flex; align-items: center; justify-content: center;">
-        <div style="position: absolute; width: 60px; height: 60px; border-radius: 50%; background: rgba(25, 135, 84, 0.15); animation: pulse 2.5s infinite; box-shadow: 0 0 10px rgba(25, 135, 84, 0.3);"></div>
-        <div style="position: absolute; width: 45px; height: 45px; border-radius: 50%; border: 2px solid rgba(25, 135, 84, 0.4); animation: pulse 2.5s infinite; animation-delay: 0.3s;"></div>
-        <div style="position: relative; width: 35px; height: 35px; border-radius: 50%; background: linear-gradient(135deg, #198754, #20c997); border: 3px solid white; box-shadow: 0 3px 12px rgba(0, 0, 0, 0.5), inset 0 1px 3px rgba(255,255,255,0.3); z-index: 2; display: flex; align-items: center; justify-content: center;">
-          <div style="position: absolute; width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 10px solid white; filter: drop-shadow(0 1px 1px rgba(0,0,0,0.4)); transform: rotate(${-heading}deg) translateY(-5px); transition: transform 0.3s ease;"></div>
-        </div>
-        <style>
-          @keyframes pulse {
-            0% { transform: scale(1); opacity: 1; }
-            50% { transform: scale(1.2); opacity: 0.5; }
-            100% { transform: scale(1.4); opacity: 0; }
-          }
-        </style>
-      </div>
-    `,
-    iconSize: [60, 60],
-    iconAnchor: [30, 30],
-    popupAnchor: [0, -30],
-  });
-};
+const MAPBOX_TOKEN = "pk.eyJ1IjoiaGFsbGV5cy1jb21ldCIsImEiOiJjbWpzcmc0dzQ0NHZ1M2dxeDRyOTFtNHFxIn0.gCWJwF521jdHqD38Nn8ZsA";
 
 type LatLngTuple = [number, number];
-
-const ORS_API_KEY =
-  "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImE3YzUxNmU2ZmMzYzQyMTQ4OTJhMWM4YWM1YTI2OWQ1IiwiaCI6Im11cm11cjY0In0="; // <-- встав свій ключ
 
 // Geocoding function to convert location name to coordinates
 const geocodeLocation = async (
@@ -232,124 +197,124 @@ const searchNearbyPOI = async (
   }
 };
 
-// ================= RoutingMachine (малює маршрут та слухає сигнал очистки) =================
-const RoutingMachine = ({
-  points,
-  clearSignal,
-  onRouteDrawn,
-}: {
-  points: LatLngTuple[];
-  clearSignal: number;
-  onRouteDrawn?: (layer: L.Layer | null) => void;
-}) => {
-  const map = useMap();
-  const routeLayerRef = useRef<L.Layer | null>(null);
-  const lastClearSignalRef = useRef<number>(clearSignal);
-
-  // Функція, що видаляє шар маршруту якщо він є
-  const removeRouteLayer = () => {
-    if (routeLayerRef.current) {
-      try {
-        map.removeLayer(routeLayerRef.current);
-      } catch (e) {
-        // ignore
-      }
-      routeLayerRef.current = null;
-      if (onRouteDrawn) onRouteDrawn(null);
+// Get route from Mapbox Directions API with enhanced options
+const getRouteFromMapbox = async (
+  coordinates: number[][],
+  options?: {
+    alternatives?: boolean;
+    steps?: boolean;
+    overview?: "full" | "simplified" | "false";
+    maxDistance?: number; // Maximum distance in meters
+  }
+): Promise<GeoJSON.FeatureCollection | null> => {
+  try {
+    if (!coordinates || coordinates.length < 2) {
+      console.warn("Need at least 2 coordinates for routing");
+      return null;
     }
-  };
 
-  // Якщо сигнал про очистку змінився — видаляємо шар
-  useEffect(() => {
-    if (clearSignal !== lastClearSignalRef.current) {
-      lastClearSignalRef.current = clearSignal;
-      removeRouteLayer();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clearSignal]);
+    // Mapbox expects [lng, lat] format
+    const coordsString = coordinates.map((c) => `${c[0]},${c[1]}`).join(";");
+    
+    // Build URL with parameters
+    const params = new URLSearchParams({
+      geometries: "geojson",
+      access_token: MAPBOX_TOKEN,
+      steps: options?.steps ? "true" : "false",
+      overview: options?.overview || "full",
+      alternatives: options?.alternatives !== false ? "true" : "false", // Enable alternatives by default for better route selection
+    });
 
-  useEffect(() => {
-    if (!map) return;
-    // завжди видаляємо попередній шар перед побудовою нового
-    removeRouteLayer();
+    const url = `https://api.mapbox.com/directions/v5/mapbox/walking/${coordsString}?${params.toString()}`;
 
-    if (!points || points.length < 2) return;
-
-    let isCanceled = false;
-
-    const fetchAndDraw = async () => {
-      try {
-        const coords = points.map((p) => [p[1], p[0]]); // [lng, lat]
-        const res = await fetch(
-          "https://api.openrouteservice.org/v2/directions/foot-walking/geojson",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: ORS_API_KEY,
-            },
-            body: JSON.stringify({ coordinates: coords }),
-          }
-        );
-
-        if (!res.ok) {
-          const txt = await res.text();
-          throw new Error(`ORS ${res.status} ${res.statusText} - ${txt}`);
-        }
-
-        const data = await res.json();
-
-        if (isCanceled) return;
-
-        if (!data || !data.features || data.features.length === 0) {
-          console.warn("ORS returned no features", data);
-          return;
-        }
-
-        // створюємо шар і позначаємо його як маршрут (корисно при діагностиці)
-        const routeLayer = L.geoJSON(data, {
-          style: () => ({
-            color: "#28a745", // зелений
-            weight: 5,
-            opacity: 0.95,
-            lineCap: "round",
-            lineJoin: "round",
-          }),
-        });
-
-        // позначимо шар кастомним прапорцем (щоб можна було знайти)
-        (routeLayer as any)._isRouteLayer = true;
-
-        routeLayer.addTo(map);
-        routeLayerRef.current = routeLayer;
-
-        // масштабування карти
-        try {
-          const bounds = (routeLayer as any).getBounds();
-          if (bounds && bounds.isValid && bounds.isValid()) {
-            map.fitBounds(bounds, { padding: [40, 40] });
-          }
-        } catch (e) {
-          // ignore
-        }
-
-        if (onRouteDrawn) onRouteDrawn(routeLayer);
-      } catch (err) {
-        console.error("Routing error:", err);
+    const response = await fetch(url);
+    if (!response.ok) {
+      const txt = await response.text();
+      let errorMessage = `Mapbox Directions API error: ${response.status}`;
+      
+      // Provide user-friendly error messages
+      if (response.status === 422) {
+        errorMessage = "Неможливо побудувати маршрут між вказаними точками. Спробуйте інші місця.";
+      } else if (response.status === 429) {
+        errorMessage = "Перевищено ліміт запитів до Mapbox API. Спробуйте пізніше.";
+      } else if (response.status >= 500) {
+        errorMessage = "Помилка сервера Mapbox. Спробуйте пізніше.";
       }
+      
+      console.error(errorMessage, txt);
+      throw new Error(errorMessage);
+    }
+
+    const data = await response.json();
+    if (!data || !data.routes || data.routes.length === 0) {
+      console.warn("Mapbox returned no routes", data);
+      return null;
+    }
+
+    // Filter routes by maxDistance if specified
+    let validRoutes = data.routes;
+    if (options?.maxDistance) {
+      validRoutes = data.routes.filter(
+        (route: any) => route.distance <= options.maxDistance!
+      );
+      
+      // If no routes within distance, try to find the closest one
+      if (validRoutes.length === 0 && data.routes.length > 0) {
+        console.warn(`No routes within ${options.maxDistance}m, using closest route`);
+        // Find route closest to maxDistance
+        validRoutes = [
+          data.routes.reduce((closest: any, current: any) => {
+            const closestDiff = Math.abs(closest.distance - options.maxDistance!);
+            const currentDiff = Math.abs(current.distance - options.maxDistance!);
+            return currentDiff < closestDiff ? current : closest;
+          }, data.routes[0])
+        ];
+      }
+    }
+
+    if (validRoutes.length === 0) {
+      console.warn("No valid routes found");
+      return null;
+    }
+
+    // Select the best route
+    // For walking, prefer shorter distance, but also consider duration
+    const bestRoute = validRoutes.reduce((best: any, current: any) => {
+      // If maxDistance is specified, prefer routes closer to it (but not exceeding)
+      if (options?.maxDistance) {
+        const bestDiff = Math.abs(best.distance - options.maxDistance);
+        const currentDiff = Math.abs(current.distance - options.maxDistance);
+        // Prefer route closer to target distance, but if both exceed, prefer shorter
+        if (best.distance > options.maxDistance && current.distance > options.maxDistance) {
+          return current.distance < best.distance ? current : best;
+        }
+        return currentDiff < bestDiff ? current : best;
+      }
+      // Otherwise, prefer shorter distance
+      return current.distance < best.distance ? current : best;
+    }, validRoutes[0]);
+
+    // Return the route as GeoJSON
+    return {
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          geometry: bestRoute.geometry,
+          properties: {
+            distance: bestRoute.distance, // in meters
+            duration: bestRoute.duration, // in seconds
+            distanceKm: (bestRoute.distance / 1000).toFixed(2),
+            durationMinutes: Math.round(bestRoute.duration / 60),
+          },
+        },
+      ],
     };
-
-    fetchAndDraw();
-
-    // cleanup при розмонтуванні або зміні точок
-    return () => {
-      isCanceled = true;
-      removeRouteLayer();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [map, JSON.stringify(points)]); // stringify щоб спрацьовував при зміні coords
-
-  return null;
+  } catch (error) {
+    console.error("Mapbox Directions error:", error);
+    // Return null to allow fallback behavior
+    return null;
+  }
 };
 
 // ================= Geolocation Control Component =================
@@ -357,12 +322,13 @@ const GeolocationControl = ({
   onLocationUpdate,
   onHeadingUpdate,
   onRequestGeolocationRef,
+  mapRef,
 }: {
   onLocationUpdate: (lat: number, lng: number) => void;
   onHeadingUpdate: (heading: number) => void;
   onRequestGeolocationRef?: React.MutableRefObject<(() => void) | null>;
+  mapRef: React.RefObject<MapRef>;
 }) => {
-  const map = useMap();
   const [isActive, setIsActive] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const watchIdRef = useRef<number | null>(null);
@@ -401,7 +367,12 @@ const GeolocationControl = ({
         }
 
         // Center map on user location
-        map.setView([latitude, longitude], map.getZoom());
+        if (mapRef.current) {
+          mapRef.current.flyTo({
+            center: [longitude, latitude],
+            zoom: mapRef.current.getZoom(),
+          });
+        }
         setError(null);
       },
       (error) => {
@@ -588,7 +559,10 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>(
       prompt?: string;
       estimatedTimeMinutes: number;
     } | null>(null);
-    const routeLayerRefParent = useRef<L.Layer | null>(null);
+    const [routeGeoJson, setRouteGeoJson] = useState<GeoJSON.FeatureCollection | null>(null);
+    const [selectedMarker, setSelectedMarker] = useState<number | null>(null);
+    const [maxDistanceMeters, setMaxDistanceMeters] = useState<number | undefined>(undefined);
+    const mapRef = useRef<MapRef>(null);
     const requestGeolocationRef = useRef<(() => void) | null>(null);
     const geolocationPermissionRef = useRef<boolean>(false);
 
@@ -666,18 +640,9 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>(
 
     const clearAll = () => {
       setPoints([]);
-      // послати сигнал компоненту RoutingMachine, щоб він видалив шар всередині
+      setRouteGeoJson(null);
+      setMaxDistanceMeters(undefined);
       setClearSignal((s) => s + 1);
-
-      // додаткова безпека: якщо батьківський реф має шар — теж видаляємо
-      if (routeLayerRefParent.current) {
-        try {
-          (routeLayerRefParent.current as any).remove();
-        } catch (e) {
-          // ignore
-        }
-        routeLayerRefParent.current = null;
-      }
     };
 
     const handleLocationUpdate = (lat: number, lng: number) => {
@@ -687,6 +652,72 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>(
     const handleHeadingUpdate = (heading: number) => {
       setUserHeading(heading);
     };
+
+    // Fetch and draw route when points change
+    useEffect(() => {
+      if (!points || points.length < 2) {
+        setRouteGeoJson(null);
+        return;
+      }
+
+      let isCanceled = false;
+
+      const fetchAndDraw = async () => {
+        try {
+          // Convert [lat, lng] to [lng, lat] for Mapbox
+          const coordinates = points.map((p) => [p[1], p[0]]);
+          const route = await getRouteFromMapbox(coordinates, {
+            alternatives: true, // Enable alternatives for better route selection
+            steps: false,
+            overview: "full",
+            maxDistance: maxDistanceMeters,
+          });
+
+          if (isCanceled) return;
+
+          if (route) {
+            setRouteGeoJson(route);
+
+            // Fit map to route bounds
+            if (mapRef.current && route.features[0]?.geometry) {
+              const geometry = route.features[0].geometry as GeoJSON.LineString;
+              if (geometry.coordinates && geometry.coordinates.length > 0) {
+                const bounds = geometry.coordinates.reduce(
+                  (bounds, coord) => {
+                    return [
+                      [Math.min(bounds[0][0], coord[0]), Math.min(bounds[0][1], coord[1])],
+                      [Math.max(bounds[1][0], coord[0]), Math.max(bounds[1][1], coord[1])],
+                    ];
+                  },
+                  [
+                    [geometry.coordinates[0][0], geometry.coordinates[0][1]],
+                    [geometry.coordinates[0][0], geometry.coordinates[0][1]],
+                  ]
+                );
+
+                mapRef.current.fitBounds(
+                  bounds as [[number, number], [number, number]],
+                  { padding: 40 }
+                );
+              }
+            }
+          } else {
+            // If route generation failed, show warning but don't break the UI
+            console.warn("Failed to generate route from Mapbox. Points may be too far apart or unreachable.");
+            // Keep the points visible even if route generation fails
+          }
+        } catch (err) {
+          console.error("Routing error:", err);
+          // Don't clear points on error - user should still see what they selected
+        }
+      };
+
+      fetchAndDraw();
+
+      return () => {
+        isCanceled = true;
+      };
+    }, [points, clearSignal, maxDistanceMeters]);
 
     const generateRouteFromPreferences = React.useCallback(
       async (preferences: WalkPreferences) => {
@@ -738,8 +769,6 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>(
           const combinedLocations = Array.from(
             new Set([...preferences.locations, ...promptLocations])
           );
-          // Allow generation even without specific locations if prompt is provided
-          // The route can be generated based on prompt alone
 
           // Determine distance - використовуємо distanceKm якщо вказано, інакше визначаємо з промпту або використовуємо 3 км за замовчуванням
           const targetDistanceKm = preferences.distanceKm
@@ -760,6 +789,9 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>(
           // Calculate average walking speed (km/h) - typical is 4-5 km/h
           const walkingSpeedKmh = 4.5;
           const maxDistanceMeters = targetDistanceKm * 1000;
+          
+          // Set max distance for route generation (with 20% buffer for flexibility)
+          setMaxDistanceMeters(Math.round(maxDistanceMeters * 1.2));
 
           // Start with user location
           const routePoints: LatLngTuple[] = [currentLocation];
@@ -1204,7 +1236,7 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>(
       <div>
         <button
           className="z-1 btn btn-success position-fixed pb-2 rounded-circle"
-          style={{ bottom: "80px", left: "20px" }}
+          style={{ bottom: "80px", left: "20px", zIndex: 1000 }}
           onClick={clearAll}
           title="Очистити маршрут"
         >
@@ -1214,7 +1246,7 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>(
         {generatedPoints.length > 1 && user && (
           <button
             className="z-1 btn btn-primary position-fixed pb-2 rounded-circle"
-            style={{ bottom: "80px", left: "80px" }}
+            style={{ bottom: "80px", left: "80px", zIndex: 1000 }}
             onClick={handleSaveRoute}
             disabled={isSaving}
             title={isSaving ? "Збереження..." : "Зберегти маршрут"}
@@ -1225,53 +1257,172 @@ const RoutingMap = React.forwardRef<RouteMapRef, RoutingMapProps>(
           </button>
         )}
 
-        <MapContainer
-          center={[49.234, 28.469]}
-          zoom={13}
+        <Map
+          ref={mapRef}
+          mapboxAccessToken={MAPBOX_TOKEN}
+          initialViewState={{
+            longitude: 28.469,
+            latitude: 49.234,
+            zoom: 13,
+          }}
           style={{ height: "calc(100dvh - 120px)", width: "100%" }}
-          className="z-0"
+          mapStyle="mapbox://styles/mapbox/streets-v12"
         >
-          <TileLayer
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            attribution='&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a> contributors'
-          />
           <GeolocationControl
             onLocationUpdate={handleLocationUpdate}
             onHeadingUpdate={handleHeadingUpdate}
             onRequestGeolocationRef={requestGeolocationRef}
+            mapRef={mapRef}
           />
 
           {userLocation && (
             <Marker
-              position={userLocation}
-              icon={createUserLocationIcon(userHeading)}
+              longitude={userLocation[1]}
+              latitude={userLocation[0]}
+              anchor="center"
             >
-              <Popup>
-                <strong>Ваше місцезнаходження</strong>
-                <br />
-                {userLocation[0].toFixed(5)}, {userLocation[1].toFixed(5)}
-                <br />
-                Напрямок: {Math.round(userHeading)}°
-              </Popup>
+              <div
+                style={{
+                  position: "relative",
+                  width: "60px",
+                  height: "60px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <div
+                  style={{
+                    position: "absolute",
+                    width: "60px",
+                    height: "60px",
+                    borderRadius: "50%",
+                    background: "rgba(25, 135, 84, 0.15)",
+                    animation: "pulse 2.5s infinite",
+                    boxShadow: "0 0 10px rgba(25, 135, 84, 0.3)",
+                  }}
+                ></div>
+                <div
+                  style={{
+                    position: "absolute",
+                    width: "45px",
+                    height: "45px",
+                    borderRadius: "50%",
+                    border: "2px solid rgba(25, 135, 84, 0.4)",
+                    animation: "pulse 2.5s infinite",
+                    animationDelay: "0.3s",
+                  }}
+                ></div>
+                <div
+                  style={{
+                    position: "relative",
+                    width: "35px",
+                    height: "35px",
+                    borderRadius: "50%",
+                    background: "linear-gradient(135deg, #198754, #20c997)",
+                    border: "3px solid white",
+                    boxShadow:
+                      "0 3px 12px rgba(0, 0, 0, 0.5), inset 0 1px 3px rgba(255,255,255,0.3)",
+                    zIndex: 2,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <div
+                    style={{
+                      position: "absolute",
+                      width: 0,
+                      height: 0,
+                      borderLeft: "6px solid transparent",
+                      borderRight: "6px solid transparent",
+                      borderBottom: "10px solid white",
+                      filter: "drop-shadow(0 1px 1px rgba(0,0,0,0.4))",
+                      transform: `rotate(${-userHeading}deg) translateY(-5px)`,
+                      transition: "transform 0.3s ease",
+                    }}
+                  ></div>
+                </div>
+                <style>
+                  {`
+                    @keyframes pulse {
+                      0% { transform: scale(1); opacity: 1; }
+                      50% { transform: scale(1.2); opacity: 0.5; }
+                      100% { transform: scale(1.4); opacity: 0; }
+                    }
+                  `}
+                </style>
+              </div>
+              {selectedMarker === -1 && userLocation && (
+                <Popup
+                  longitude={userLocation[1]}
+                  latitude={userLocation[0]}
+                  closeOnClick={false}
+                  onClose={() => setSelectedMarker(null)}
+                  anchor="bottom"
+                >
+                  <strong>Ваше місцезнаходження</strong>
+                  <br />
+                  {userLocation[0].toFixed(5)}, {userLocation[1].toFixed(5)}
+                  <br />
+                  Напрямок: {Math.round(userHeading)}°
+                </Popup>
+              )}
             </Marker>
           )}
 
           {points.map((pos, idx) => (
-            <Marker key={idx} position={pos}>
-              <Popup>
-                <strong>Точка {idx + 1}</strong>
-                <br />
-                {pos[0].toFixed(5)}, {pos[1].toFixed(5)}
-              </Popup>
+            <Marker
+              key={idx}
+              longitude={pos[1]}
+              latitude={pos[0]}
+              anchor="center"
+              onClick={() => setSelectedMarker(idx)}
+            >
+              <div
+                style={{
+                  width: "20px",
+                  height: "20px",
+                  borderRadius: "50%",
+                  backgroundColor: "#198754",
+                  border: "2px solid white",
+                  boxShadow: "0 2px 5px rgba(0,0,0,0.3)",
+                }}
+              ></div>
+              {selectedMarker === idx && (
+                <Popup
+                  longitude={pos[1]}
+                  latitude={pos[0]}
+                  closeOnClick={false}
+                  onClose={() => setSelectedMarker(null)}
+                  anchor="bottom"
+                >
+                  <strong>Точка {idx + 1}</strong>
+                  <br />
+                  {pos[0].toFixed(5)}, {pos[1].toFixed(5)}
+                </Popup>
+              )}
             </Marker>
           ))}
 
-          <RoutingMachine
-            points={points}
-            clearSignal={clearSignal}
-            onRouteDrawn={(layer) => (routeLayerRefParent.current = layer)}
-          />
-        </MapContainer>
+          {routeGeoJson && (
+            <Source id="route" type="geojson" data={routeGeoJson}>
+              <Layer
+                id="route-line"
+                type="line"
+                layout={{
+                  "line-join": "round",
+                  "line-cap": "round",
+                }}
+                paint={{
+                  "line-color": "#28a745",
+                  "line-width": 5,
+                  "line-opacity": 0.95,
+                }}
+              />
+            </Source>
+          )}
+        </Map>
       </div>
     );
   }
