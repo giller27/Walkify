@@ -438,9 +438,9 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
         style={{
           width: "100%",
           height: panelExpanded
-            ? "calc(100vh - 56px - 195px)"
-            : "calc(100vh - 56px - 65px)",
-          position: "relative",
+            ? "calc(100vh - 60px - 150px)"
+            : "calc(100vh - 60px - 65px)",
+          position: "absolute",
           transition: "height 0.3s ease-in-out",
         }}
       />

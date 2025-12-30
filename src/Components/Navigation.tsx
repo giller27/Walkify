@@ -234,7 +234,7 @@ function NavigationContent() {
           Home
         </Button>
         <Button className="btn btn-success text-center" href="/favs">
-          <i className="bi bi-heart"></i>
+          <i className="bi bi-geo-alt"></i>
           <br />
           Routes
         </Button>
