@@ -15,6 +15,7 @@ import Home from "../pages/Home";
 import Favorites from "../pages/Favorites";
 import Profile from "../pages/Profile";
 import Statistic from "../pages/Statistic";
+import Chat from "../pages/Chat";
 import Login from "../pages/Login";
 import ViewUserProfile from "../pages/ViewUserProfile";
 import AuthCallback from "../pages/AuthCallback";
@@ -173,17 +174,36 @@ function NavigationContent() {
                 <div className="px-4 py-2 bg-light rounded">
                   <p className="text-dark mb-2">Результати пошуку:</p>
                   {searchResults.map((result) => (
-                    <button
+                    <div
                       key={result.id}
-                      className="d-block w-100 text-start p-2 border rounded mb-2 bg-white"
-                      style={{ cursor: "pointer", textDecoration: "none" }}
-                      onClick={() => handleSelectUser(result.id)}
+                      className="d-flex align-items-center gap-2 p-2 border rounded mb-2 bg-white"
                     >
-                      <div className="fw-bold text-dark">
-                        {result.full_name || "Unknown User"}
-                      </div>
-                      <small className="text-muted">{result.email}</small>
-                    </button>
+                      <button
+                        className="flex-grow-1 text-start border-0 bg-transparent"
+                        style={{ cursor: "pointer", textDecoration: "none" }}
+                        onClick={() => handleSelectUser(result.id)}
+                      >
+                        <div className="fw-bold text-dark">
+                          {result.full_name || "Unknown User"}
+                        </div>
+                        <small className="text-muted">{result.email}</small>
+                      </button>
+                      {user && (
+                        <Button
+                          variant="success"
+                          size="sm"
+                          onClick={() => {
+                            setShowSearchResults(false);
+                            setSearchQuery("");
+                            setSearchResults([]);
+                            setIsMenuOpen(false);
+                            navigate(`/chat?with=${result.id}`);
+                          }}
+                        >
+                          <i className="bi bi-chat-dots"></i>
+                        </Button>
+                      )}
+                    </div>
                   ))}
                 </div>
               )}
@@ -196,6 +216,12 @@ function NavigationContent() {
                 <hr></hr>
                 <Nav.Link href="/stat">Statistic</Nav.Link>
                 <hr></hr>
+                {user && (
+                  <>
+                    <Nav.Link href="/chat">Messages</Nav.Link>
+                    <hr></hr>
+                  </>
+                )}
                 {user && (
                   <>
                     <Nav.Link href={`/profile`}>Profile</Nav.Link>
@@ -244,6 +270,13 @@ function NavigationContent() {
           Statistic
         </Button>
         {user && (
+          <Button className="btn btn-success text-center" href="/chat">
+            <i className="bi bi-chat-dots"></i>
+            <br />
+            Chat
+          </Button>
+        )}
+        {user && (
           <Button
             className="btn btn-success text-center rounded-0"
             href={`/profile`}
@@ -278,6 +311,8 @@ function Navigation() {
         <Route path="/profile" Component={Profile} />
         <Route path="/favs" Component={Favorites} />
         <Route path="/stat" Component={Statistic} />
+        <Route path="/chat" Component={Chat} />
+        <Route path="/chat/:conversationId" Component={Chat} />
         <Route path="/login" Component={Login} />
         <Route path="/user/:id" Component={ViewUserProfile} />
         <Route path="/auth/callback" Component={AuthCallback} />

@@ -226,14 +226,26 @@ function ViewUserProfile() {
                   </Col>
                 </Row>
               </div>
-              <Button
-                variant="success"
-                className="w-100 mt-4"
-                onClick={() => navigate("/home")}
-              >
-                <i className="bi bi-house me-2"></i>
-                Назад на головну
-              </Button>
+              <div className="d-flex gap-2 mt-4">
+                {currentUser && profile?.id !== currentUser.id && (
+                  <Button
+                    variant="success"
+                    className="flex-grow-1"
+                    onClick={() => navigate(`/chat?with=${profile?.id}`)}
+                  >
+                    <i className="bi bi-chat-dots me-2"></i>
+                    Message
+                  </Button>
+                )}
+                <Button
+                  variant="outline-success"
+                  className={currentUser && profile?.id !== currentUser.id ? "" : "w-100"}
+                  onClick={() => navigate("/home")}
+                >
+                  <i className="bi bi-house me-2"></i>
+                  Назад на головну
+                </Button>
+              </div>
             </Card.Body>
           </Card>
         </Col>
