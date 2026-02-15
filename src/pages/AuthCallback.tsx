@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Container, Spinner, Alert } from "react-bootstrap";
 import {
+  supabase,
   getCurrentUser,
   getUserProfile,
   createUserProfile,
@@ -14,8 +15,23 @@ const AuthCallback: React.FC = () => {
   useEffect(() => {
     const handleCallback = async () => {
       try {
-        // Get the current user from the OAuth callback
-        const user = await getCurrentUser();
+        // OAuth callback: Supabase may pass auth via hash (#access_token=...) or PKCE (?code=...)
+        const params = new URLSearchParams(window.location.search);
+        const hashParams = new URLSearchParams(window.location.hash?.replace("#", "") || "");
+        const code = params.get("code") || hashParams.get("code");
+
+        if (code) {
+          const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+          if (exchangeError) throw exchangeError;
+        } else {
+          // Hash flow: client parses #access_token=... automatically, but may need a moment
+          await new Promise((r) => setTimeout(r, 300));
+        }
+
+        let user = (await supabase.auth.getSession()).data.session?.user;
+        if (!user) {
+          user = await getCurrentUser();
+        }
 
         if (user) {
           // Check if profile exists
@@ -31,8 +47,9 @@ const AuthCallback: React.FC = () => {
             await createUserProfile(user.id, userEmail, fullName);
           }
 
-          // Redirect to home
-          navigate("/");
+          // Clear URL params (tokens) and redirect to home
+          window.history.replaceState({}, document.title, window.location.pathname);
+          navigate("/", { replace: true });
         } else {
           setError("Failed to get user information");
         }
