@@ -123,12 +123,16 @@ export async function signIn(email: string, password: string) {
 
 /**
  * Вхід через Google
+ * Використовує VITE_SITE_URL якщо задано (для Vercel), інакше window.location.origin
  */
 export async function signInWithGoogle() {
+  const siteUrl = import.meta.env.VITE_SITE_URL || window.location.origin;
+  const redirectTo = `${siteUrl.replace(/\/$/, '')}/auth/callback`;
+
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: {
-      redirectTo: `${window.location.origin}/auth/callback`,
+      redirectTo,
     },
   });
 
