@@ -16,18 +16,9 @@ const AuthCallback: React.FC = () => {
   useEffect(() => {
     const handleCallback = async () => {
       try {
-        // OAuth callback: Supabase may pass auth via hash (#access_token=...) or PKCE (?code=...)
-        const params = new URLSearchParams(window.location.search);
-        const hashParams = new URLSearchParams(window.location.hash?.replace("#", "") || "");
-        const code = params.get("code") || hashParams.get("code");
-
-        if (code) {
-          const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
-          if (exchangeError) throw exchangeError;
-        } else {
-          // Hash flow: client parses #access_token=... automatically, but may need a moment
-          await new Promise((r) => setTimeout(r, 300));
-        }
+        // OAuth callback: implicit flow uses hash (#access_token=...)
+        // Give client time to parse URL and establish session
+        await new Promise((r) => setTimeout(r, 300));
 
         let user: User | null | undefined = (await supabase.auth.getSession()).data.session?.user;
         if (!user) {
