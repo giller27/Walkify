@@ -258,37 +258,37 @@ function NavigationContent() {
         </Container>
       </Navbar>
       <ButtonGroup className="fixed-bottom" style={{ height: "60px" }}>
-        <Button as={Link} to="/home" className="btn btn-success text-center rounded-0">
+        <Button onClick={() => navigate("/home")} className="btn btn-success text-center rounded-0">
           <i className="bi bi-house"></i>
           <br />
           Home
         </Button>
-        <Button as={Link} to="/favs" className="btn btn-success text-center">
+        <Button onClick={() => navigate("/favs")} className="btn btn-success text-center">
           <i className="bi bi-geo-alt"></i>
           <br />
           Routes
         </Button>
-        <Button as={Link} to="/stat" className="btn btn-success text-center">
+        <Button onClick={() => navigate("/stat")} className="btn btn-success text-center">
           <i className="bi bi-graph-up"></i>
           <br />
           Statistic
         </Button>
         {user && (
-          <Button as={Link} to="/chat" className="btn btn-success text-center">
+          <Button onClick={() => navigate("/chat")} className="btn btn-success text-center">
             <i className="bi bi-chat-dots"></i>
             <br />
             Chat
           </Button>
         )}
         {user && (
-          <Button as={Link} to="/profile" className="btn btn-success text-center rounded-0">
+          <Button onClick={() => navigate("/profile")} className="btn btn-success text-center rounded-0">
             <i className="bi bi-person"></i>
             <br />
             Profile
           </Button>
         )}
         {!user && (
-          <Button as={Link} to="/login" className="btn btn-success text-center rounded-0">
+          <Button onClick={() => navigate("/login")} className="btn btn-success text-center rounded-0">
             <i className="bi bi-box-arrow-in-right"></i>
             <br />
             Login
