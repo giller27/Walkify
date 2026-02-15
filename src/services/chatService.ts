@@ -73,29 +73,38 @@ export async function getOrCreateConversation(otherUserId: string): Promise<Conv
     }
   }
 
-  // Create new conversation
-  const { data: newConv, error: convError } = await supabase
+  // Create new conversation without RETURNING.
+  // RLS can block selecting the row before participants are inserted.
+  const newConversationId = crypto.randomUUID();
+
+  const { error: convError } = await supabase
     .from('conversations')
-    .insert({})
-    .select()
-    .single();
+    .insert({ id: newConversationId });
 
   if (convError) throw convError;
 
   // Add both participants (current user first for RLS)
   const { error: p1Error } = await supabase
     .from('conversation_participants')
-    .insert({ conversation_id: newConv.id, user_id: user.id });
+    .insert({ conversation_id: newConversationId, user_id: user.id });
 
   if (p1Error) throw p1Error;
 
   const { error: p2Error } = await supabase
     .from('conversation_participants')
-    .insert({ conversation_id: newConv.id, user_id: otherUserId });
+    .insert({ conversation_id: newConversationId, user_id: otherUserId });
 
   if (p2Error) throw p2Error;
 
-  return newConv as Conversation;
+  const { data: createdConv, error: createdConvError } = await supabase
+    .from('conversations')
+    .select('*')
+    .eq('id', newConversationId)
+    .single();
+
+  if (createdConvError) throw createdConvError;
+
+  return createdConv as Conversation;
 }
 
 /**
