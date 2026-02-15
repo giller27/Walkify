@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Container, Spinner, Alert } from "react-bootstrap";
+import { User } from "@supabase/supabase-js";
 import {
   supabase,
   getCurrentUser,
@@ -28,7 +29,7 @@ const AuthCallback: React.FC = () => {
           await new Promise((r) => setTimeout(r, 300));
         }
 
-        let user = (await supabase.auth.getSession()).data.session?.user;
+        let user: User | null | undefined = (await supabase.auth.getSession()).data.session?.user;
         if (!user) {
           user = await getCurrentUser();
         }
