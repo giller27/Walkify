@@ -24,6 +24,7 @@ import {
   Route,
   Routes,
   useNavigate,
+  Link,
 } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import {
@@ -89,7 +90,7 @@ function NavigationContent() {
         collapseOnSelect
       >
         <Container>
-          <Navbar.Brand href="/home">
+          <Navbar.Brand as={Link} to="/home">
             <img
               src={logo}
               height="30"
@@ -143,8 +144,10 @@ function NavigationContent() {
                   </h1>
                   {user ? (
                     <Nav.Link
-                      href={`/user/${profile?.id || user?.id}`}
+                      as={Link}
+                      to={`/user/${profile?.id || user?.id}`}
                       className="m-0"
+                      onClick={() => setIsMenuOpen(false)}
                     >
                       {user?.email}
                     </Nav.Link>
@@ -210,27 +213,28 @@ function NavigationContent() {
 
               <Nav className="px-4 mt-2">
                 <hr></hr>
-                <Nav.Link href="/home">Home</Nav.Link>
+                <Nav.Link as={Link} to="/home" onClick={() => setIsMenuOpen(false)}>Home</Nav.Link>
                 <hr></hr>
-                <Nav.Link href="/favs">Routes</Nav.Link>
+                <Nav.Link as={Link} to="/favs" onClick={() => setIsMenuOpen(false)}>Routes</Nav.Link>
                 <hr></hr>
-                <Nav.Link href="/stat">Statistic</Nav.Link>
+                <Nav.Link as={Link} to="/stat" onClick={() => setIsMenuOpen(false)}>Statistic</Nav.Link>
                 <hr></hr>
                 {user && (
                   <>
-                    <Nav.Link href="/chat">Messages</Nav.Link>
+                    <Nav.Link as={Link} to="/chat" onClick={() => setIsMenuOpen(false)}>Messages</Nav.Link>
                     <hr></hr>
                   </>
                 )}
                 {user && (
                   <>
-                    <Nav.Link href={`/profile`}>Profile</Nav.Link>
+                    <Nav.Link as={Link} to="/profile" onClick={() => setIsMenuOpen(false)}>Profile</Nav.Link>
                     <hr></hr>
                     <Nav.Link
-                      href="/login"
                       className="w-100"
+                      style={{ cursor: "pointer" }}
                       onClick={async () => {
                         await signOut();
+                        setIsMenuOpen(false);
                         navigate("/login");
                       }}
                     >
@@ -241,7 +245,7 @@ function NavigationContent() {
                 )}
                 {!user && (
                   <>
-                    <Nav.Link href="/login" className="text-warning">
+                    <Nav.Link as={Link} to="/login" className="text-warning" onClick={() => setIsMenuOpen(false)}>
                       <i className="bi bi-box-arrow-in-right me-1"></i>
                       Увійти
                     </Nav.Link>
@@ -254,43 +258,37 @@ function NavigationContent() {
         </Container>
       </Navbar>
       <ButtonGroup className="fixed-bottom" style={{ height: "60px" }}>
-        <Button className="btn btn-success text-center rounded-0" href="/home">
+        <Button as={Link} to="/home" className="btn btn-success text-center rounded-0">
           <i className="bi bi-house"></i>
           <br />
           Home
         </Button>
-        <Button className="btn btn-success text-center" href="/favs">
+        <Button as={Link} to="/favs" className="btn btn-success text-center">
           <i className="bi bi-geo-alt"></i>
           <br />
           Routes
         </Button>
-        <Button className="btn btn-success text-center" href="/stat">
+        <Button as={Link} to="/stat" className="btn btn-success text-center">
           <i className="bi bi-graph-up"></i>
           <br />
           Statistic
         </Button>
         {user && (
-          <Button className="btn btn-success text-center" href="/chat">
+          <Button as={Link} to="/chat" className="btn btn-success text-center">
             <i className="bi bi-chat-dots"></i>
             <br />
             Chat
           </Button>
         )}
         {user && (
-          <Button
-            className="btn btn-success text-center rounded-0"
-            href={`/profile`}
-          >
+          <Button as={Link} to="/profile" className="btn btn-success text-center rounded-0">
             <i className="bi bi-person"></i>
             <br />
             Profile
           </Button>
         )}
         {!user && (
-          <Button
-            className="btn btn-success text-center rounded-0"
-            href="/login"
-          >
+          <Button as={Link} to="/login" className="btn btn-success text-center rounded-0">
             <i className="bi bi-box-arrow-in-right"></i>
             <br />
             Login

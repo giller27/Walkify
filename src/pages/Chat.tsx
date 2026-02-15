@@ -28,7 +28,7 @@ import { RealtimeChannel } from "@supabase/supabase-js";
 import userAvatar from "../assets/images/user.png";
 
 function Chat() {
-  const { user, profile } = useAuth();
+  const { user, profile, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const { conversationId: routeConvId } = useParams<{ conversationId?: string }>();
   const [searchParams] = useSearchParams();
@@ -63,6 +63,7 @@ function Chat() {
 
   // Load or create conversation when route/query changes
   useEffect(() => {
+    if (authLoading) return;
     if (!user) {
       setLoading(false);
       navigate("/login");
@@ -101,7 +102,7 @@ function Chat() {
     };
 
     init();
-  }, [user, routeConvId, withUserId, loadConversations]);
+  }, [user, authLoading, routeConvId, withUserId, loadConversations]);
 
   // When active conversation changes, load messages and subscribe
   useEffect(() => {
@@ -184,6 +185,14 @@ function Chat() {
     return preview;
   };
 
+  if (authLoading) {
+    return (
+      <Container className="mt-5 pt-5 text-center">
+        <Spinner animation="border" variant="success" />
+        <p className="mt-3">Loading...</p>
+      </Container>
+    );
+  }
   if (!user) {
     return (
       <Container className="mt-5 pt-5 text-center">
