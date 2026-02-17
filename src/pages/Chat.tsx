@@ -32,6 +32,8 @@ function Chat() {
   const { conversationId: routeConvId } = useParams<{ conversationId?: string }>();
   const [searchParams] = useSearchParams();
   const withUserId = searchParams.get("with");
+  const sharedRouteId = searchParams.get("shareRouteId");
+  const sharedRouteName = searchParams.get("shareRouteName");
 
   const [conversations, setConversations] = useState<ConversationWithOtherUser[]>([]);
   const [activeConversation, setActiveConversation] = useState<ConversationWithOtherUser | null>(null);
@@ -57,6 +59,16 @@ function Chat() {
     }
     setNotificationPermission(Notification.permission);
   }, []);
+
+  // Prefill message if user came from "share route" action
+  useEffect(() => {
+    if (sharedRouteId && sharedRouteName && !newMessage) {
+      const decodedName = decodeURIComponent(sharedRouteName);
+      const base = window.location.origin;
+      const shareText = `I want to share a walking route with you: "${decodedName}".\nRoute ID: ${sharedRouteId}\nYou can search for it in routes in Walkify.`;
+      setNewMessage(shareText);
+    }
+  }, [sharedRouteId, sharedRouteName, newMessage]);
 
   const handleEnableNotifications = async () => {
     if (typeof Notification === "undefined") return;

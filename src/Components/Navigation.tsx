@@ -51,6 +51,8 @@ function NavigationContent() {
   const [userInfo, setUserInfo] = useState<GoogleUser | null>(null);
   const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
   const [lastMessagePreview, setLastMessagePreview] = useState<string | null>(null);
+  const [lastSenderName, setLastSenderName] = useState<string | null>(null);
+  const [lastSenderAvatar, setLastSenderAvatar] = useState<string | null>(null);
   const [showMessageToast, setShowMessageToast] = useState(false);
   const [notificationPermission, setNotificationPermission] =
     useState<NotificationPermission | "unsupported">("default");
@@ -95,7 +97,7 @@ function NavigationContent() {
           schema: "public",
           table: "messages",
         },
-        (payload) => {
+        async (payload) => {
           const msg = payload.new as { sender_id: string; content: string };
           // Ignore messages sent by the current user
           if (!user || msg.sender_id === user.id) return;
@@ -107,6 +109,24 @@ function NavigationContent() {
               ? msg.content.slice(0, 80) + "…"
               : msg.content;
           setLastMessagePreview(preview);
+          try {
+            const { data: profile } = await supabase
+              .from("profiles")
+              .select("*")
+              .eq("id", msg.sender_id)
+              .single();
+            if (profile) {
+              setLastSenderName(profile.full_name || profile.email || "User");
+              setLastSenderAvatar(profile.avatar_url || null);
+            } else {
+              setLastSenderName("User");
+              setLastSenderAvatar(null);
+            }
+          } catch (err) {
+            console.error("Error loading sender profile for toast:", err);
+            setLastSenderName("User");
+            setLastSenderAvatar(null);
+          }
           setShowMessageToast(true);
 
           // Native browser notification (if allowed)
@@ -115,8 +135,9 @@ function NavigationContent() {
             Notification.permission === "granted"
           ) {
             try {
-              new Notification("New message", {
+              new Notification(lastSenderName || "New message", {
                 body: msg.content,
+                icon: lastSenderAvatar || undefined,
               });
             } catch (err) {
               console.error("Error showing system notification:", err);
@@ -162,16 +183,33 @@ function NavigationContent() {
       {lastMessagePreview && (
         <ToastContainer position="top-center" className="mt-5 pt-4">
           <Toast
-            bg="light"
+            bg="success"
             onClose={() => setShowMessageToast(false)}
             show={showMessageToast}
             delay={5000}
             autohide
+            className="text-white shadow-lg border-0 rounded-3"
           >
-            <Toast.Header closeButton>
-              <strong className="me-auto">New message</strong>
+            <Toast.Header
+              closeButton
+              className="bg-success text-white border-0 d-flex align-items-center"
+            >
+              <img
+                src={lastSenderAvatar || User}
+                alt="Sender"
+                className="rounded-circle me-2"
+                style={{ width: 32, height: 32, objectFit: "cover" }}
+              />
+              <div className="me-auto">
+                <div className="fw-semibold">
+                  {lastSenderName || "New message"}
+                </div>
+                <small className="text-white-50">New chat message</small>
+              </div>
             </Toast.Header>
-            <Toast.Body>{lastMessagePreview}</Toast.Body>
+            <Toast.Body className="bg-success text-white">
+              {lastMessagePreview}
+            </Toast.Body>
           </Toast>
         </ToastContainer>
       )}

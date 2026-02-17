@@ -221,6 +221,15 @@ function Favorites() {
     navigate("/");
   };
 
+  const handleShareRoute = (route: RouteItem) => {
+    // Перейти до чату з попередньо заповненим повідомленням про маршрут
+    const params = new URLSearchParams({
+      shareRouteId: route.id,
+      shareRouteName: route.name,
+    });
+    navigate(`/chat?${params.toString()}`);
+  };
+
   const renderRouteCard = (
     route: RouteItem,
     isFavorite: boolean,
@@ -263,6 +272,14 @@ function Favorites() {
               onClick={() => handleViewRoute(route)}
             >
               <i className="bi bi-map"></i> Переглянути на карті
+            </Button>
+
+            <Button
+              variant="outline-success"
+              size="sm"
+              onClick={() => handleShareRoute(route)}
+            >
+              <i className="bi bi-share"></i> Поділитися в чаті
             </Button>
 
             {!route.is_public && !isMyPublished && (
