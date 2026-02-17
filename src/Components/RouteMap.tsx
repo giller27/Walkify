@@ -7,18 +7,22 @@ import React, {
 } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
-import { generateRouteFromText, RouteResult } from "../services/routeService";
+import {
+  generateRouteFromText,
+  RouteResult,
+  RouteWaypoint,
+} from "../services/routeService";
 import { saveRoute } from "../services/supabaseService";
 import type { SavedRoute } from "../services/supabaseService";
 
-const MAPBOX_TOKEN =
-  "pk.eyJ1IjoiaGFsbGV5cy1jb21ldCIsImEiOiJjbWpzcmc0dzQ0NHZ1M2dxeDRyOTFtNHFxIn0.gCWJwF521jdHqD38Nn8ZsA";
+const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN;
 
 export interface WalkPreferences {
   prompt: string;
   locations: string[];
   distance?: number;
   duration?: number;
+  routeMode?: "point_to_point" | "exploration";
 }
 
 export interface RouteMapRef {
@@ -51,6 +55,7 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
     );
     const [isGenerating, setIsGenerating] = useState(false);
     const currentRouteRef = useRef<RouteResult | null>(null);
+    const [selectedPoi, setSelectedPoi] = useState<RouteWaypoint | null>(null);
 
     // Ініціалізація карти
     useEffect(() => {
@@ -127,6 +132,7 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
       try {
         clearRoute();
         clearMarkers();
+        setSelectedPoi(null);
 
         // Конвертуємо координати в формат [lng, lat] для Mapbox
         const coordinates = route.points.map(
@@ -179,13 +185,40 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
         ) {
           route.waypoints.forEach((waypoint) => {
             const [lat, lng] = waypoint.location;
-            const marker = new mapboxgl.Marker({ color: "#ffc107" })
+            const el = document.createElement("div");
+            el.style.width = "18px";
+            el.style.height = "18px";
+            el.style.borderRadius = "50%";
+            el.style.border = "2px solid #ffffff";
+            el.style.boxShadow = "0 0 4px rgba(0,0,0,0.3)";
+            el.style.cursor = "pointer";
+
+            // Колір залежить від типу POI
+            const typeColorMap: Record<string, string> = {
+              cafe: "#ff8c00",
+              restaurant: "#ff5722",
+              park: "#4caf50",
+              shop: "#3f51b5",
+              museum: "#9c27b0",
+              library: "#03a9f4",
+              place_of_worship: "#795548",
+              beach: "#ffc107",
+              lake: "#2196f3",
+              river: "#00bcd4",
+              custom: "#6c757d",
+            };
+
+            const color =
+              typeColorMap[waypoint.type] || typeColorMap["custom"];
+            el.style.backgroundColor = color;
+            el.title = waypoint.name;
+
+            el.addEventListener("click", () => {
+              setSelectedPoi(waypoint);
+            });
+
+            const marker = new mapboxgl.Marker({ element: el })
               .setLngLat([lng, lat])
-              .setPopup(
-                new mapboxgl.Popup().setHTML(
-                  `<b>${waypoint.name}</b><br><small>${waypoint.type}</small>`
-                )
-              )
               .addTo(mapRef.current!);
             markersRef.current.push(marker);
           });
@@ -224,7 +257,10 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
       try {
         const route = await generateRouteFromText(
           userLocation,
-          preferences.prompt
+          preferences.prompt,
+          {
+            routeMode: preferences.routeMode,
+          }
         );
         currentRouteRef.current = route;
 
@@ -428,22 +464,144 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
         clearRoute();
         clearMarkers();
         currentRouteRef.current = null;
+      setSelectedPoi(null);
       },
       isGenerating,
     }));
 
     return (
-      <div
-        ref={mapContainerRef}
-        style={{
-          width: "100%",
-          height: panelExpanded
-            ? "calc(100vh - 60px - 150px)"
-            : "calc(100vh - 60px - 65px)",
-          position: "absolute",
-          transition: "height 0.3s ease-in-out",
-        }}
-      />
+      <>
+        <div
+          ref={mapContainerRef}
+          style={{
+            width: "100%",
+            height: panelExpanded
+              ? "calc(100vh - 60px - 150px)"
+              : "calc(100vh - 60px - 65px)",
+            position: "absolute",
+            transition: "height 0.3s ease-in-out",
+          }}
+        />
+        {selectedPoi && (
+          <div
+            style={{
+              position: "fixed",
+              right: 16,
+              bottom: panelExpanded ? 200 : 80,
+              zIndex: 1200,
+              backgroundColor: "#ffffff",
+              borderRadius: 12,
+              boxShadow: "0 4px 16px rgba(0,0,0,0.2)",
+              padding: 12,
+              maxWidth: 280,
+            }}
+          >
+            <div className="d-flex justify-content-between align-items-start mb-2">
+              <div>
+                <div
+                  style={{
+                    fontWeight: 600,
+                    fontSize: "0.95rem",
+                  }}
+                >
+                  {selectedPoi.name}
+                </div>
+                <div
+                  style={{
+                    fontSize: "0.8rem",
+                    color: "#6c757d",
+                    textTransform: "capitalize",
+                  }}
+                >
+                  {selectedPoi.type}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedPoi(null)}
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  cursor: "pointer",
+                  padding: 0,
+                  marginLeft: 8,
+                }}
+                aria-label="Закрити"
+              >
+                <i className="bi bi-x-lg" />
+              </button>
+            </div>
+            {selectedPoi.photoUrl && (
+              <div
+                style={{
+                  marginBottom: 8,
+                  borderRadius: 8,
+                  overflow: "hidden",
+                  maxHeight: 140,
+                }}
+              >
+                <img
+                  src={selectedPoi.photoUrl}
+                  alt={selectedPoi.name}
+                  style={{ width: "100%", objectFit: "cover" }}
+                />
+              </div>
+            )}
+            {selectedPoi.address && (
+              <div
+                style={{
+                  fontSize: "0.8rem",
+                  color: "#495057",
+                  marginBottom: 4,
+                }}
+              >
+                <i className="bi bi-geo-alt me-1" />
+                {selectedPoi.address}
+              </div>
+            )}
+            {typeof selectedPoi.rating === "number" && (
+              <div
+                style={{
+                  fontSize: "0.8rem",
+                  color: "#343a40",
+                  marginBottom: 4,
+                }}
+              >
+                <i className="bi bi-star-fill text-warning me-1" />
+                {selectedPoi.rating.toFixed(1)}
+                {typeof selectedPoi.userRatingsTotal === "number" &&
+                  selectedPoi.userRatingsTotal > 0 && (
+                    <span className="text-muted ms-1">
+                      ({selectedPoi.userRatingsTotal})
+                    </span>
+                  )}
+              </div>
+            )}
+            {selectedPoi.description && (
+              <div
+                style={{
+                  fontSize: "0.8rem",
+                  color: "#495057",
+                  marginTop: 4,
+                }}
+              >
+                {selectedPoi.description}
+              </div>
+            )}
+            {selectedPoi.source && (
+              <div
+                style={{
+                  fontSize: "0.7rem",
+                  color: "#adb5bd",
+                  marginTop: 6,
+                }}
+              >
+                Джерело: {selectedPoi.source}
+              </div>
+            )}
+          </div>
+        )}
+      </>
     );
   }
 );

@@ -36,7 +36,24 @@ export interface SavedRoute {
   waypoints?: {
     location: [number, number];
     name: string;
-    type: 'cafe' | 'park' | 'shop' | 'custom';
+    type:
+      | 'cafe'
+      | 'park'
+      | 'shop'
+      | 'restaurant'
+      | 'museum'
+      | 'library'
+      | 'place_of_worship'
+      | 'beach'
+      | 'lake'
+      | 'river'
+      | 'custom';
+    address?: string;
+    rating?: number;
+    userRatingsTotal?: number;
+    photoUrl?: string;
+    description?: string;
+    source?: 'mapbox' | 'osm' | 'google_like' | 'custom';
   }[];
   statistics: {
     distanceKm: number;

@@ -6,6 +6,7 @@ export interface WalkPreferences {
   locations: string[];
   distance?: number;
   duration?: number;
+  routeMode?: "point_to_point" | "exploration";
 }
 
 interface WalkPreferencesBarProps {
@@ -35,10 +36,14 @@ const WalkPreferencesBar: React.FC<WalkPreferencesBarProps> = ({
 }) => {
   const [prompt, setPrompt] = useState(initialPreferences?.prompt || "");
   const [error, setError] = useState("");
+  const [routeMode, setRouteMode] = useState<
+    "point_to_point" | "exploration"
+  >(initialPreferences?.routeMode || "exploration");
 
   useEffect(() => {
     if (initialPreferences) {
       setPrompt(initialPreferences.prompt || "");
+      setRouteMode(initialPreferences.routeMode || "exploration");
     }
   }, [initialPreferences]);
 
@@ -54,6 +59,7 @@ const WalkPreferencesBar: React.FC<WalkPreferencesBarProps> = ({
     const preferences: WalkPreferences = {
       prompt: prompt.trim(),
       locations: [],
+      routeMode,
     };
 
     onGenerate(preferences);
@@ -154,7 +160,7 @@ const WalkPreferencesBar: React.FC<WalkPreferencesBarProps> = ({
                   </Alert>
                 )}
 
-                <div className="d-flex align-items-center gap-2 flex-wrap">
+                <div className="d-flex align-items-center gap-2 flex-wrap mb-2">
                   <Button
                     variant="outline-primary"
                     size="sm"
@@ -178,6 +184,37 @@ const WalkPreferencesBar: React.FC<WalkPreferencesBarProps> = ({
                       {example}
                     </Button>
                   ))}
+                </div>
+                <div className="d-flex align-items-center gap-3 flex-wrap">
+                  <span className="text-muted small">Тип маршруту:</span>
+                  <div className="btn-group btn-group-sm" role="group">
+                    <Button
+                      type="button"
+                      variant={
+                        routeMode === "exploration"
+                          ? "success"
+                          : "outline-success"
+                      }
+                      onClick={() => setRouteMode("exploration")}
+                      disabled={isGenerating}
+                      style={{ borderRadius: "15px 0 0 15px" }}
+                    >
+                      Прогулянковий
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={
+                        routeMode === "point_to_point"
+                          ? "success"
+                          : "outline-success"
+                      }
+                      onClick={() => setRouteMode("point_to_point")}
+                      disabled={isGenerating}
+                      style={{ borderRadius: "0 15px 15px 0" }}
+                    >
+                      A → B
+                    </Button>
+                  </div>
                 </div>
               </>
             )}

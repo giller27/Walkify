@@ -1,12 +1,18 @@
 // Сервіс для пошуку місць та побудови маршрутів
 
-const MAPBOX_TOKEN = "pk.eyJ1IjoiaGFsbGV5cy1jb21ldCIsImEiOiJjbWpzcmc0dzQ0NHZ1M2dxeDRyOTFtNHFxIn0.gCWJwF521jdHqD38Nn8ZsA";
+const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN;
 
 export interface Place {
   name: string;
   coordinates: [number, number]; // [lng, lat]
   type: string;
   address?: string;
+  rating?: number;
+  userRatingsTotal?: number;
+  photoUrl?: string;
+  description?: string;
+  source?: PoiSource;
+  externalId?: string;
 }
 
 export interface RoutePoint {
@@ -15,13 +21,36 @@ export interface RoutePoint {
   name?: string;
 }
 
+export type PoiSource = 'mapbox' | 'osm' | 'google_like' | 'custom';
+
+export type PoiCategory =
+  | 'cafe'
+  | 'park'
+  | 'shop'
+  | 'restaurant'
+  | 'museum'
+  | 'library'
+  | 'place_of_worship'
+  | 'beach'
+  | 'lake'
+  | 'river'
+  | 'custom';
+
+export interface RouteWaypoint {
+  location: [number, number]; // [lat, lng]
+  name: string;
+  type: PoiCategory;
+  address?: string;
+  rating?: number;
+  userRatingsTotal?: number;
+  photoUrl?: string;
+  description?: string;
+  source?: PoiSource;
+}
+
 export interface RouteResult {
   points: [number, number][]; // [lat, lng] для сумісності з існуючим кодом
-  waypoints: {
-    location: [number, number]; // [lat, lng]
-    name: string;
-    type: 'cafe' | 'park' | 'shop' | 'custom';
-  }[];
+  waypoints: RouteWaypoint[];
   distanceKm: number;
   estimatedTimeMinutes: number;
   locations: string[];
@@ -67,6 +96,8 @@ export function parseRouteRequest(text: string): {
   waypointTypes: string[];
   waypointNames: string[]; // Конкретні назви проміжних точок
   targetDistance?: number; // Бажана відстань маршруту в км
+  isExplorationMode?: boolean; // Чи це прогулянковий маршрут без чіткого пункту призначення
+  desiredPoiCount?: number; // Бажана кількість зупинок-POI
 } {
   const lowerText = text.toLowerCase();
   let destinationType: string | null = null;
@@ -326,7 +357,41 @@ export function parseRouteRequest(text: string): {
     }
   }
 
-  return { destinationType, destinationName, waypointTypes, waypointNames, targetDistance };
+  // Визначаємо, чи користувач хоче саме прогулянковий маршрут без конкретної кінцевої точки
+  const isExplorationMode =
+    !destinationName &&
+    !destinationType &&
+    (lowerText.includes('прогулянка') ||
+      lowerText.includes('прогулятись') ||
+      lowerText.includes('прогулка')) &&
+    (waypointTypes.length > 0 || waypointNames.length > 0);
+
+  // Приблизно визначаємо бажану кількість зупинок (якщо користувач згадує цифру + "зупинок"/"місць")
+  let desiredPoiCount: number | undefined;
+  const poiCountMatch =
+    text.match(/(\d+)\s*(зупинок|місць|точок|places)/i) ||
+    text.match(/(\d+)\s*poi/i);
+  if (poiCountMatch && poiCountMatch[1]) {
+    const count = parseInt(poiCountMatch[1], 10);
+    if (!Number.isNaN(count) && count > 0) {
+      desiredPoiCount = Math.max(2, Math.min(count, 10));
+    }
+  }
+
+  // Значення за замовчуванням для кількості зупинок, якщо не вказано
+  if (!desiredPoiCount) {
+    desiredPoiCount = 6;
+  }
+
+  return {
+    destinationType,
+    destinationName,
+    waypointTypes,
+    waypointNames,
+    targetDistance,
+    isExplorationMode,
+    desiredPoiCount,
+  };
 }
 
 /**
@@ -447,6 +512,8 @@ export async function findPlaceByName(
                   coordinates: [lng, lat],
                   type: 'custom',
                   address: item.display_name,
+                  source: 'osm',
+                  externalId: item.osm_id ? String(item.osm_id) : undefined,
                 };
               }
             }
@@ -495,6 +562,8 @@ export async function findPlaceByName(
             coordinates: [lng, lat],
             type: 'custom',
             address: feature.place_name,
+            source: 'mapbox',
+            externalId: feature.id,
           };
         }
       }
@@ -568,6 +637,8 @@ export async function findNearestPlace(
                   coordinates: [lng, lat],
                   type: category,
                   address: item.display_name,
+                  source: 'osm',
+                  externalId: item.osm_id ? String(item.osm_id) : undefined,
                 };
               }
             }
@@ -634,6 +705,8 @@ export async function findNearestPlace(
           coordinates: [lng, lat],
           type: category,
           address: feature.place_name,
+          source: 'mapbox',
+          externalId: feature.id,
         };
       }
     }
@@ -687,6 +760,50 @@ export async function findWaypointOnRoute(
 }
 
 /**
+ * Пошук кількох POI навколо заданого центру
+ */
+export async function searchNearbyPois(
+  center: [number, number], // [lng, lat]
+  types: string[],
+  radius: number = 3000,
+  limitPerType: number = 3
+): Promise<Place[]> {
+  const results: Place[] = [];
+
+  for (const placeType of types) {
+    const found = await findNearestPlace(center, placeType, radius);
+    if (found) {
+      const alreadyExists = results.some(
+        (p) =>
+          Math.abs(p.coordinates[0] - found.coordinates[0]) < 0.001 &&
+          Math.abs(p.coordinates[1] - found.coordinates[1]) < 0.001
+      );
+      if (!alreadyExists) {
+        results.push(found);
+      }
+    }
+
+    // Для простоти зараз беремо по одному місцю на тип.
+    // У майбутньому можна розширити до кількох точок на тип (limitPerType).
+    if (results.length >= limitPerType * types.length) {
+      break;
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Збагачує POI додатковими даними (рейтинг, фото тощо).
+ * Зараз це заглушка, яка просто повертає початкові дані,
+ * але тут легко підʼєднати зовнішні сервіси на кшталт Google Places.
+ */
+export async function enrichPoiDetails(poi: Place): Promise<Place> {
+  // TODO: підʼєднати зовнішні API для фото/рейтингів.
+  return poi;
+}
+
+/**
  * Побудова маршруту через Mapbox Directions API
  */
 export async function buildRoute(
@@ -735,7 +852,7 @@ export async function buildRoute(
     const waypointsWithNames = waypoints.map((wp, index) => ({
       location: [wp[1], wp[0]] as [number, number], // [lat, lng]
       name: `Проміжна точка ${index + 1}`,
-      type: 'custom' as const,
+      type: 'custom' as PoiCategory,
     }));
 
     return {
@@ -830,14 +947,18 @@ async function extendRouteToDistance(
             ...additionalWaypointPlaces.map(wp => ({
               location: [wp.coordinates[1], wp.coordinates[0]] as [number, number],
               name: wp.name,
-              type: (wp.type === 'cafe' ? 'cafe' : 
-                     wp.type === 'park' ? 'park' : 
-                     wp.type === 'shop' ? 'shop' : 'custom') as 'cafe' | 'park' | 'shop' | 'custom',
+              type: (wp.type === 'cafe'
+                ? 'cafe'
+                : wp.type === 'park'
+                ? 'park'
+                : wp.type === 'shop'
+                ? 'shop'
+                : 'custom') as PoiCategory,
             })),
             {
               location: [endPlace.coordinates[1], endPlace.coordinates[0]] as [number, number],
               name: endPlace.name,
-              type: (endPlace.type === 'park' ? 'park' : 'custom') as 'cafe' | 'park' | 'shop' | 'custom',
+              type: (endPlace.type === 'park' ? 'park' : 'custom') as PoiCategory,
             }
           ];
           
@@ -857,9 +978,13 @@ async function extendRouteToDistance(
         ...additionalWaypointPlaces.map(wp => ({
           location: [wp.coordinates[1], wp.coordinates[0]] as [number, number],
           name: wp.name,
-          type: (wp.type === 'cafe' ? 'cafe' : 
-                 wp.type === 'park' ? 'park' : 
-                 wp.type === 'shop' ? 'shop' : 'custom') as 'cafe' | 'park' | 'shop' | 'custom',
+          type: (wp.type === 'cafe'
+            ? 'cafe'
+            : wp.type === 'park'
+            ? 'park'
+            : wp.type === 'shop'
+            ? 'shop'
+            : 'custom') as PoiCategory,
         }))
       ];
       
@@ -895,13 +1020,134 @@ async function extendRouteToDistance(
 }
 
 /**
+ * Генерує прогулянковий маршрут з кількома POI навколо користувача.
+ * Використовує позицію користувача як старт і кінець (наближено кільцевий маршрут),
+ * а між ними додає цікаві точки.
+ */
+export async function generateExplorationRoute(
+  userLocation: [number, number], // [lng, lat]
+  options: {
+    types: string[];
+    desiredPoiCount?: number;
+    targetDistanceKm?: number;
+  }
+): Promise<RouteResult> {
+  const { types, desiredPoiCount = 6, targetDistanceKm } = options;
+
+  // Якщо користувач не вказав типи місць, беремо базовий набір
+  const effectiveTypes =
+    types.length > 0
+      ? types
+      : ['park', 'cafe', 'museum', 'library', 'place_of_worship'];
+
+  // Шукаємо кілька цікавих місць навколо користувача
+  const nearbyPois = await searchNearbyPois(userLocation, effectiveTypes, 3000);
+
+  if (nearbyPois.length === 0) {
+    throw new Error(
+      'Поруч не вдалося знайти цікаві місця для прогулянки. Спробуйте інший район або уточніть запит.'
+    );
+  }
+
+  // Обмежуємо кількість POI
+  const selectedPois = nearbyPois.slice(
+    0,
+    Math.max(2, Math.min(desiredPoiCount, nearbyPois.length))
+  );
+
+  const enrichedPois = await Promise.all(
+    selectedPois.map((poi) => enrichPoiDetails(poi))
+  );
+
+  // Формуємо послідовність координат: start -> poi1 -> ... -> poiN -> start (для відчуття прогулянки)
+  const waypointCoords: [number, number][] = enrichedPois.map(
+    (p) => p.coordinates
+  );
+
+  // Для простоти використовуємо останній POI як кінець маршруту.
+  const destination = waypointCoords[waypointCoords.length - 1];
+
+  let route = await buildRoute(userLocation, destination, waypointCoords);
+
+  // Мапимо POI в розширені waypoints
+  route.waypoints = enrichedPois.map((wp) => ({
+    location: [wp.coordinates[1], wp.coordinates[0]] as [number, number],
+    name: wp.name,
+    type: (wp.type === 'cafe'
+      ? 'cafe'
+      : wp.type === 'park'
+      ? 'park'
+      : wp.type === 'shop'
+      ? 'shop'
+      : wp.type === 'restaurant'
+      ? 'restaurant'
+      : wp.type === 'museum'
+      ? 'museum'
+      : wp.type === 'library'
+      ? 'library'
+      : wp.type === 'place_of_worship'
+      ? 'place_of_worship'
+      : wp.type === 'beach'
+      ? 'beach'
+      : wp.type === 'lake'
+      ? 'lake'
+      : wp.type === 'river'
+      ? 'river'
+      : 'custom') as PoiCategory,
+    address: wp.address,
+    rating: wp.rating,
+    userRatingsTotal: wp.userRatingsTotal,
+    photoUrl: wp.photoUrl,
+    description: wp.description,
+    source: wp.source,
+  }));
+
+  route.locations = enrichedPois.map((wp) => wp.name);
+
+  // Якщо задана цільова дистанція – спробуємо подовжити маршрут.
+  if (targetDistanceKm && route.distanceKm < targetDistanceKm) {
+    route = await extendRouteToDistance(
+      route,
+      targetDistanceKm,
+      userLocation,
+      destination
+    );
+  }
+
+  return route;
+}
+
+/**
  * Генерація маршруту на основі текстового запиту
  */
 export async function generateRouteFromText(
   userLocation: [number, number], // [lng, lat]
-  text: string
+  text: string,
+  options?: { routeMode?: "point_to_point" | "exploration" }
 ): Promise<RouteResult> {
-  const { destinationType, destinationName, waypointTypes, waypointNames, targetDistance } = parseRouteRequest(text);
+  const {
+    destinationType,
+    destinationName,
+    waypointTypes,
+    waypointNames,
+    targetDistance,
+    isExplorationMode,
+    desiredPoiCount,
+  } = parseRouteRequest(text);
+
+  const forceExploration = options?.routeMode === "exploration";
+  const forcePointToPoint = options?.routeMode === "point_to_point";
+
+  // Якщо це прогулянковий маршрут без чіткої кінцевої точки
+  // або користувач явно обрав прогулянковий режим — генеруємо маршрут навколо користувача
+  if (!forcePointToPoint && (isExplorationMode || forceExploration)) {
+    const allTypes = [...new Set([...waypointTypes, destinationType].filter(Boolean) as string[])];
+    return generateExplorationRoute(userLocation, {
+      types: allTypes,
+      desiredPoiCount,
+      targetDistanceKm: targetDistance,
+    });
+  }
 
   // Якщо є конкретна назва, шукаємо її напряму
   let destination: Place | null = null;
@@ -961,12 +1207,16 @@ export async function generateRouteFromText(
   ];
 
   // Оновлюємо waypoints з правильними назвами та типами
-  route.waypoints = waypointPlaces.map((wp, index) => ({
+  route.waypoints = waypointPlaces.map((wp) => ({
     location: [wp.coordinates[1], wp.coordinates[0]] as [number, number], // [lat, lng]
     name: wp.name,
-    type: (wp.type === 'cafe' ? 'cafe' : 
-           wp.type === 'park' ? 'park' : 
-           wp.type === 'shop' ? 'shop' : 'custom') as 'cafe' | 'park' | 'shop' | 'custom',
+    type: (wp.type === 'cafe'
+      ? 'cafe'
+      : wp.type === 'park'
+      ? 'park'
+      : wp.type === 'shop'
+      ? 'shop'
+      : 'custom') as PoiCategory,
   }));
 
   // Якщо вказана цільова відстань і поточний маршрут коротший, подовжуємо його
