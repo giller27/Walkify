@@ -15,6 +15,7 @@ import Home from "../pages/Home";
 import Favorites from "../pages/Favorites";
 import Profile from "../pages/Profile";
 import Statistic from "../pages/Statistic";
+import Chat from "../pages/Chat";
 import Login from "../pages/Login";
 import ViewUserProfile from "../pages/ViewUserProfile";
 import AuthCallback from "../pages/AuthCallback";
@@ -23,6 +24,7 @@ import {
   Route,
   Routes,
   useNavigate,
+  Link,
 } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import {
@@ -88,7 +90,7 @@ function NavigationContent() {
         collapseOnSelect
       >
         <Container>
-          <Navbar.Brand href="/home">
+          <Navbar.Brand as={Link} to="/home">
             <img
               src={logo}
               height="30"
@@ -142,8 +144,10 @@ function NavigationContent() {
                   </h1>
                   {user ? (
                     <Nav.Link
-                      href={`/user/${profile?.id || user?.id}`}
+                      as={Link}
+                      to={`/user/${profile?.id || user?.id}`}
                       className="m-0"
+                      onClick={() => setIsMenuOpen(false)}
                     >
                       {user?.email}
                     </Nav.Link>
@@ -173,38 +177,64 @@ function NavigationContent() {
                 <div className="px-4 py-2 bg-light rounded">
                   <p className="text-dark mb-2">Результати пошуку:</p>
                   {searchResults.map((result) => (
-                    <button
+                    <div
                       key={result.id}
-                      className="d-block w-100 text-start p-2 border rounded mb-2 bg-white"
-                      style={{ cursor: "pointer", textDecoration: "none" }}
-                      onClick={() => handleSelectUser(result.id)}
+                      className="d-flex align-items-center gap-2 p-2 border rounded mb-2 bg-white"
                     >
-                      <div className="fw-bold text-dark">
-                        {result.full_name || "Unknown User"}
-                      </div>
-                      <small className="text-muted">{result.email}</small>
-                    </button>
+                      <button
+                        className="flex-grow-1 text-start border-0 bg-transparent"
+                        style={{ cursor: "pointer", textDecoration: "none" }}
+                        onClick={() => handleSelectUser(result.id)}
+                      >
+                        <div className="fw-bold text-dark">
+                          {result.full_name || "Unknown User"}
+                        </div>
+                        <small className="text-muted">{result.email}</small>
+                      </button>
+                      {user && (
+                        <Button
+                          variant="success"
+                          size="sm"
+                          onClick={() => {
+                            setShowSearchResults(false);
+                            setSearchQuery("");
+                            setSearchResults([]);
+                            setIsMenuOpen(false);
+                            navigate(`/chat?with=${result.id}`);
+                          }}
+                        >
+                          <i className="bi bi-chat-dots"></i>
+                        </Button>
+                      )}
+                    </div>
                   ))}
                 </div>
               )}
 
               <Nav className="px-4 mt-2">
                 <hr></hr>
-                <Nav.Link href="/home">Home</Nav.Link>
+                <Nav.Link as={Link} to="/home" onClick={() => setIsMenuOpen(false)}>Home</Nav.Link>
                 <hr></hr>
-                <Nav.Link href="/favs">Routes</Nav.Link>
+                <Nav.Link as={Link} to="/favs" onClick={() => setIsMenuOpen(false)}>Routes</Nav.Link>
                 <hr></hr>
-                <Nav.Link href="/stat">Statistic</Nav.Link>
+                <Nav.Link as={Link} to="/stat" onClick={() => setIsMenuOpen(false)}>Statistic</Nav.Link>
                 <hr></hr>
                 {user && (
                   <>
-                    <Nav.Link href={`/profile`}>Profile</Nav.Link>
+                    <Nav.Link as={Link} to="/chat" onClick={() => setIsMenuOpen(false)}>Messages</Nav.Link>
+                    <hr></hr>
+                  </>
+                )}
+                {user && (
+                  <>
+                    <Nav.Link as={Link} to="/profile" onClick={() => setIsMenuOpen(false)}>Profile</Nav.Link>
                     <hr></hr>
                     <Nav.Link
-                      href="/login"
                       className="w-100"
+                      style={{ cursor: "pointer" }}
                       onClick={async () => {
                         await signOut();
+                        setIsMenuOpen(false);
                         navigate("/login");
                       }}
                     >
@@ -215,7 +245,7 @@ function NavigationContent() {
                 )}
                 {!user && (
                   <>
-                    <Nav.Link href="/login" className="text-warning">
+                    <Nav.Link as={Link} to="/login" className="text-warning" onClick={() => setIsMenuOpen(false)}>
                       <i className="bi bi-box-arrow-in-right me-1"></i>
                       Увійти
                     </Nav.Link>
@@ -228,36 +258,37 @@ function NavigationContent() {
         </Container>
       </Navbar>
       <ButtonGroup className="fixed-bottom" style={{ height: "60px" }}>
-        <Button className="btn btn-success text-center rounded-0" href="/home">
+        <Button onClick={() => navigate("/home")} className="btn btn-success text-center rounded-0">
           <i className="bi bi-house"></i>
           <br />
           Home
         </Button>
-        <Button className="btn btn-success text-center" href="/favs">
+        <Button onClick={() => navigate("/favs")} className="btn btn-success text-center">
           <i className="bi bi-geo-alt"></i>
           <br />
           Routes
         </Button>
-        <Button className="btn btn-success text-center" href="/stat">
+        <Button onClick={() => navigate("/stat")} className="btn btn-success text-center">
           <i className="bi bi-graph-up"></i>
           <br />
           Statistic
         </Button>
         {user && (
-          <Button
-            className="btn btn-success text-center rounded-0"
-            href={`/profile`}
-          >
+          <Button onClick={() => navigate("/chat")} className="btn btn-success text-center">
+            <i className="bi bi-chat-dots"></i>
+            <br />
+            Chat
+          </Button>
+        )}
+        {user && (
+          <Button onClick={() => navigate("/profile")} className="btn btn-success text-center rounded-0">
             <i className="bi bi-person"></i>
             <br />
             Profile
           </Button>
         )}
         {!user && (
-          <Button
-            className="btn btn-success text-center rounded-0"
-            href="/login"
-          >
+          <Button onClick={() => navigate("/login")} className="btn btn-success text-center rounded-0">
             <i className="bi bi-box-arrow-in-right"></i>
             <br />
             Login
@@ -278,6 +309,8 @@ function Navigation() {
         <Route path="/profile" Component={Profile} />
         <Route path="/favs" Component={Favorites} />
         <Route path="/stat" Component={Statistic} />
+        <Route path="/chat" Component={Chat} />
+        <Route path="/chat/:conversationId" Component={Chat} />
         <Route path="/login" Component={Login} />
         <Route path="/user/:id" Component={ViewUserProfile} />
         <Route path="/auth/callback" Component={AuthCallback} />

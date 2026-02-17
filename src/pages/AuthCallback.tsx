@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Container, Spinner, Alert } from "react-bootstrap";
+import { User } from "@supabase/supabase-js";
 import {
+  supabase,
   getCurrentUser,
   getUserProfile,
   createUserProfile,
@@ -14,8 +16,14 @@ const AuthCallback: React.FC = () => {
   useEffect(() => {
     const handleCallback = async () => {
       try {
-        // Get the current user from the OAuth callback
-        const user = await getCurrentUser();
+        // OAuth callback: implicit flow uses hash (#access_token=...)
+        // Give client time to parse URL and establish session
+        await new Promise((r) => setTimeout(r, 300));
+
+        let user: User | null | undefined = (await supabase.auth.getSession()).data.session?.user;
+        if (!user) {
+          user = await getCurrentUser();
+        }
 
         if (user) {
           // Check if profile exists
@@ -31,8 +39,9 @@ const AuthCallback: React.FC = () => {
             await createUserProfile(user.id, userEmail, fullName);
           }
 
-          // Redirect to home
-          navigate("/");
+          // Clear URL params (tokens) and redirect to home
+          window.history.replaceState({}, document.title, window.location.pathname);
+          navigate("/", { replace: true });
         } else {
           setError("Failed to get user information");
         }

@@ -19,7 +19,11 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
   throw new Error('Missing Supabase credentials in .env.local. Please ensure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are set.');
 }
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: {
+    detectSessionInUrl: true,
+  },
+});
 
 // ============ ТИПИ ДАНИХ ============
 
@@ -123,12 +127,16 @@ export async function signIn(email: string, password: string) {
 
 /**
  * Вхід через Google
+ * Використовує VITE_SITE_URL якщо задано (для Vercel), інакше window.location.origin
  */
 export async function signInWithGoogle() {
+  const siteUrl = import.meta.env.VITE_SITE_URL || window.location.origin;
+  const redirectTo = `${siteUrl.replace(/\/$/, '')}/auth/callback`;
+
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: {
-      redirectTo: `${window.location.origin}/auth/callback`,
+      redirectTo,
     },
   });
 
@@ -315,24 +323,35 @@ export async function uploadAvatar(userId: string, file: File) {
  * Пошук користувачів за іменем або email
  */
 export async function searchUsers(query: string): Promise<UserProfile[]> {
-  if (!query || query.trim().length === 0) {
+  const q = query?.trim();
+  if (!q || q.length === 0) return [];
+
+  try {
+    const { data, error } = await supabase.rpc('search_profiles', {
+      search_term: q,
+    });
+
+    if (error) {
+      // Fallback to direct query if RPC doesn't exist
+      const pattern = `%${q}%`;
+      const { data: fallbackData, error: fallbackError } = await supabase
+        .from('profiles')
+        .select('*')
+        .or(`full_name.ilike.${pattern},email.ilike.${pattern}`)
+        .limit(10);
+
+      if (fallbackError) {
+        console.error('Error searching users:', fallbackError);
+        return [];
+      }
+      return (fallbackData || []) as UserProfile[];
+    }
+
+    return (data || []) as UserProfile[];
+  } catch (err) {
+    console.error('Error searching users:', err);
     return [];
   }
-
-  const searchTerm = `%${query.toLowerCase()}%`;
-
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('*')
-    .or(`full_name.ilike.${searchTerm},email.ilike.${searchTerm}`)
-    .limit(10);
-
-  if (error) {
-    console.error('Error searching users:', error);
-    return [];
-  }
-
-  return (data || []) as UserProfile[];
 }
 
 // ============ МАРШРУТИ ============
