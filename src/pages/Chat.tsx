@@ -9,7 +9,6 @@ import {
   Button,
   Spinner,
   Alert,
-  Badge,
 } from "react-bootstrap";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
@@ -43,10 +42,31 @@ function Chat() {
   const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
+  const [notificationPermission, setNotificationPermission] =
+    useState<NotificationPermission | "unsupported">("default");
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
+
+  // Track browser notification permission for this page (UI hint)
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof Notification === "undefined") {
+      setNotificationPermission("unsupported");
+      return;
+    }
+    setNotificationPermission(Notification.permission);
+  }, []);
+
+  const handleEnableNotifications = async () => {
+    if (typeof Notification === "undefined") return;
+    try {
+      const permission = await Notification.requestPermission();
+      setNotificationPermission(permission);
+    } catch (err) {
+      console.error("Notification permission error:", err);
+    }
+  };
 
   // Load conversations
   const loadConversations = useCallback(async (): Promise<ConversationWithOtherUser[]> => {
@@ -290,9 +310,20 @@ function Chat() {
                   className="rounded-circle me-2"
                   style={{ width: 40, height: 40, objectFit: "cover" }}
                 />
-                <h5 className="mb-0">
-                  {activeConversation.other_user?.full_name || "Unknown"}
-                </h5>
+                <div className="flex-grow-1">
+                  <h5 className="mb-0">
+                    {activeConversation.other_user?.full_name || "Unknown"}
+                  </h5>
+                </div>
+                {notificationPermission === "default" && (
+                  <Button
+                    variant="outline-success"
+                    size="sm"
+                    onClick={handleEnableNotifications}
+                  >
+                    Enable notifications
+                  </Button>
+                )}
               </div>
 
               {/* Messages */}

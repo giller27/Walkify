@@ -8,6 +8,8 @@ import {
   ButtonGroup,
   Offcanvas,
   Dropdown,
+  Toast,
+  ToastContainer,
 } from "react-bootstrap";
 import logo from "../assets/images/icon.png";
 import User from "../assets/images/user.png";
@@ -32,6 +34,7 @@ import {
   signOut,
   UserProfile as UserProfileType,
 } from "../services/supabaseService";
+import { supabase } from "../services/supabaseService";
 
 interface GoogleUser {
   name: string;
@@ -46,6 +49,11 @@ function NavigationContent() {
   const [showSearchResults, setShowSearchResults] = useState(false);
   const { user, profile } = useAuth();
   const [userInfo, setUserInfo] = useState<GoogleUser | null>(null);
+  const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
+  const [lastMessagePreview, setLastMessagePreview] = useState<string | null>(null);
+  const [showMessageToast, setShowMessageToast] = useState(false);
+  const [notificationPermission, setNotificationPermission] =
+    useState<NotificationPermission | "unsupported">("default");
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -54,6 +62,74 @@ function NavigationContent() {
       setUserInfo(JSON.parse(storedUser));
     }
   }, []);
+
+  // Track browser notification permission
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof Notification === "undefined") {
+      setNotificationPermission("unsupported");
+      return;
+    }
+    setNotificationPermission(Notification.permission);
+  }, []);
+
+  const handleEnableNotifications = async () => {
+    if (typeof Notification === "undefined") return;
+    try {
+      const permission = await Notification.requestPermission();
+      setNotificationPermission(permission);
+    } catch (err) {
+      console.error("Notification permission error:", err);
+    }
+  };
+
+  // Global realtime subscription for incoming messages (for badge + toast)
+  useEffect(() => {
+    if (!user) return;
+
+    const channel = supabase
+      .channel("messages:global")
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "messages",
+        },
+        (payload) => {
+          const msg = payload.new as { sender_id: string; content: string };
+          // Ignore messages sent by the current user
+          if (!user || msg.sender_id === user.id) return;
+
+          setHasUnreadMessages(true);
+
+          const preview =
+            msg.content.length > 80
+              ? msg.content.slice(0, 80) + "…"
+              : msg.content;
+          setLastMessagePreview(preview);
+          setShowMessageToast(true);
+
+          // Native browser notification (if allowed)
+          if (
+            typeof Notification !== "undefined" &&
+            Notification.permission === "granted"
+          ) {
+            try {
+              new Notification("New message", {
+                body: msg.content,
+              });
+            } catch (err) {
+              console.error("Error showing system notification:", err);
+            }
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user]);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -82,6 +158,24 @@ function NavigationContent() {
 
   return (
     <>
+      {/* In-app popup for latest message */}
+      {lastMessagePreview && (
+        <ToastContainer position="top-center" className="mt-5 pt-4">
+          <Toast
+            bg="light"
+            onClose={() => setShowMessageToast(false)}
+            show={showMessageToast}
+            delay={5000}
+            autohide
+          >
+            <Toast.Header closeButton>
+              <strong className="me-auto">New message</strong>
+            </Toast.Header>
+            <Toast.Body>{lastMessagePreview}</Toast.Body>
+          </Toast>
+        </ToastContainer>
+      )}
+
       <Navbar
         className="bg-success fixed-top"
         expand="true"
@@ -221,7 +315,32 @@ function NavigationContent() {
                 <hr></hr>
                 {user && (
                   <>
-                    <Nav.Link as={Link} to="/chat" onClick={() => setIsMenuOpen(false)}>Messages</Nav.Link>
+                    <Nav.Link
+                      as={Link}
+                      to="/chat"
+                      onClick={() => {
+                        setHasUnreadMessages(false);
+                        setIsMenuOpen(false);
+                      }}
+                      className="d-flex align-items-center justify-content-between"
+                    >
+                      <span>Messages</span>
+                      {hasUnreadMessages && (
+                        <span className="badge bg-danger ms-2 rounded-pill">
+                          ●
+                        </span>
+                      )}
+                    </Nav.Link>
+                    {notificationPermission === "default" && (
+                      <Button
+                        variant="outline-light"
+                        size="sm"
+                        className="mt-2 w-100"
+                        onClick={handleEnableNotifications}
+                      >
+                        Allow device notifications
+                      </Button>
+                    )}
                     <hr></hr>
                   </>
                 )}
@@ -274,8 +393,22 @@ function NavigationContent() {
           Statistic
         </Button>
         {user && (
-          <Button onClick={() => navigate("/chat")} className="btn btn-success text-center">
+          <Button
+            onClick={() => {
+              setHasUnreadMessages(false);
+              navigate("/chat");
+            }}
+            className="btn btn-success text-center position-relative"
+          >
             <i className="bi bi-chat-dots"></i>
+            {hasUnreadMessages && (
+              <span
+                className="position-absolute top-0 end-0 translate-middle badge rounded-pill bg-danger"
+                style={{ width: "10px", height: "10px", padding: 0 }}
+              >
+                {" "}
+              </span>
+            )}
             <br />
             Chat
           </Button>
