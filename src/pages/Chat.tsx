@@ -25,6 +25,22 @@ import {
 } from "../services/chatService";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import userAvatar from "../assets/images/user.png";
+import MapPreview from "../Components/MapPreview";
+
+interface SharedRoutePreview {
+  id: string;
+  name: string;
+  description?: string;
+  distance_km?: number;
+  points?: [number, number][];
+  is_public?: boolean;
+}
+
+interface RouteShareMessagePayload {
+  type: "route_share";
+  route: SharedRoutePreview;
+  text?: string | null;
+}
 
 function Chat() {
   const { user, profile, loading: authLoading } = useAuth();
@@ -32,8 +48,7 @@ function Chat() {
   const { conversationId: routeConvId } = useParams<{ conversationId?: string }>();
   const [searchParams] = useSearchParams();
   const withUserId = searchParams.get("with");
-  const sharedRouteId = searchParams.get("shareRouteId");
-  const sharedRouteName = searchParams.get("shareRouteName");
+  const hasSharedRouteFlag = searchParams.get("shareRoute");
 
   const [conversations, setConversations] = useState<ConversationWithOtherUser[]>([]);
   const [activeConversation, setActiveConversation] = useState<ConversationWithOtherUser | null>(null);
@@ -46,6 +61,7 @@ function Chat() {
   const channelRef = useRef<RealtimeChannel | null>(null);
   const [notificationPermission, setNotificationPermission] =
     useState<NotificationPermission | "unsupported">("default");
+  const [sharedRoute, setSharedRoute] = useState<SharedRoutePreview | null>(null);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -60,15 +76,25 @@ function Chat() {
     setNotificationPermission(Notification.permission);
   }, []);
 
-  // Prefill message if user came from "share route" action
+  // Load route to share (from favorites) if present
   useEffect(() => {
-    if (sharedRouteId && sharedRouteName && !newMessage) {
-      const decodedName = decodeURIComponent(sharedRouteName);
-      const base = window.location.origin;
-      const shareText = `I want to share a walking route with you: "${decodedName}".\nRoute ID: ${sharedRouteId}\nYou can search for it in routes in Walkify.`;
-      setNewMessage(shareText);
+    if (!hasSharedRouteFlag) return;
+    try {
+      const stored = localStorage.getItem("routeToShare");
+      if (stored) {
+        const parsed = JSON.parse(stored) as SharedRoutePreview;
+        setSharedRoute(parsed);
+        if (!newMessage) {
+          setNewMessage(
+            `I want to share a walking route with you: "${parsed.name}".`
+          );
+        }
+      }
+    } catch (err) {
+      console.error("Error loading shared route:", err);
+      setSharedRoute(null);
     }
-  }, [sharedRouteId, sharedRouteName, newMessage]);
+  }, [hasSharedRouteFlag, newMessage]);
 
   const handleEnableNotifications = async () => {
     if (typeof Notification === "undefined") return;
@@ -92,6 +118,26 @@ function Chat() {
       return [];
     }
   }, [user]);
+
+  const updateConversationsWithMessage = useCallback(
+    (conversationId: string, msg: Message) => {
+      setConversations((prev) => {
+        if (!prev || prev.length === 0) return prev;
+        const updated = prev.map((c) =>
+          c.id === conversationId ? { ...c, last_message: msg } : c
+        );
+        const index = updated.findIndex((c) => c.id === conversationId);
+        if (index > 0) {
+          const conv = updated[index];
+          const rest = [...updated];
+          rest.splice(index, 1);
+          return [conv, ...rest];
+        }
+        return updated;
+      });
+    },
+    []
+  );
 
   // Load or create conversation when route/query changes
   useEffect(() => {
@@ -159,6 +205,7 @@ function Chat() {
           if (prev.some((m) => m.id === msg.id)) return prev;
           return [...prev, msg];
         });
+        updateConversationsWithMessage(activeConversation.id, msg);
       });
       channelRef.current = channel;
     };
@@ -185,21 +232,50 @@ function Chat() {
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeConversation || !newMessage.trim() || sending) return;
+    if (!activeConversation || sending) return;
+    if (!newMessage.trim() && !sharedRoute) return;
 
     setSending(true);
     try {
-      const msg = await sendMessage(activeConversation.id, newMessage);
+      let contentToSend = newMessage;
+      if (sharedRoute) {
+        const payload: RouteShareMessagePayload = {
+          type: "route_share",
+          route: sharedRoute,
+          text: newMessage.trim() || null,
+        };
+        contentToSend = JSON.stringify(payload);
+      }
+
+      const msg = await sendMessage(activeConversation.id, contentToSend);
       setMessages((prev) => [...prev, msg]);
       setNewMessage("");
+      if (sharedRoute) {
+        setSharedRoute(null);
+        localStorage.removeItem("routeToShare");
+      }
+      updateConversationsWithMessage(activeConversation.id, msg);
       scrollToBottom();
-      // Refresh conversation list to update last message
-      await loadConversations();
     } catch (err: any) {
       setError(err.message || "Failed to send message");
     } finally {
       setSending(false);
     }
+  };
+
+  const handleOpenSharedRoute = (route: SharedRoutePreview) => {
+    if (route.points && Array.isArray(route.points)) {
+      localStorage.setItem(
+        "routeToView",
+        JSON.stringify({
+          name: route.name,
+          description: route.description,
+          points: route.points,
+          distance_km: route.distance_km,
+        })
+      );
+    }
+    navigate("/");
   };
 
   const formatTime = (dateStr: string) => {
@@ -345,6 +421,15 @@ function Chat() {
               >
                 {messages.map((msg) => {
                   const isOwn = msg.sender_id === user.id;
+                  let routeShare: RouteShareMessagePayload | null = null;
+                  try {
+                    const parsed = JSON.parse(msg.content) as RouteShareMessagePayload;
+                    if (parsed && parsed.type === "route_share") {
+                      routeShare = parsed;
+                    }
+                  } catch {
+                    routeShare = null;
+                  }
                   return (
                     <div
                       key={msg.id}
@@ -363,9 +448,70 @@ function Chat() {
                             {msg.sender_profile?.full_name || "User"}
                           </small>
                         )}
-                        <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                          {msg.content}
-                        </span>
+                        {routeShare ? (
+                          <>
+                            {routeShare.text && (
+                              <p
+                                className="mb-2"
+                                style={{
+                                  whiteSpace: "pre-wrap",
+                                  wordBreak: "break-word",
+                                }}
+                              >
+                                {routeShare.text}
+                              </p>
+                            )}
+                            <Card
+                              className={`border-0 ${
+                                isOwn ? "bg-success-subtle" : "bg-light"
+                              }`}
+                            >
+                              {routeShare.route.points && (
+                                <MapPreview
+                                  points={routeShare.route.points}
+                                  isPublic={routeShare.route.is_public}
+                                  height={160}
+                                />
+                              )}
+                              <Card.Body className="p-2">
+                                <div className="d-flex justify-content-between align-items-center">
+                                  <div>
+                                    <div className="fw-semibold">
+                                      {routeShare.route.name}
+                                    </div>
+                                    {routeShare.route.distance_km !==
+                                      undefined && (
+                                      <small className="text-muted">
+                                        {(routeShare.route.distance_km || 0).toFixed(
+                                          1
+                                        )}{" "}
+                                        км
+                                      </small>
+                                    )}
+                                  </div>
+                                  <Button
+                                    variant="outline-success"
+                                    size="sm"
+                                    onClick={() =>
+                                      handleOpenSharedRoute(routeShare!.route)
+                                    }
+                                  >
+                                    <i className="bi bi-map"></i>
+                                  </Button>
+                                </div>
+                              </Card.Body>
+                            </Card>
+                          </>
+                        ) : (
+                          <span
+                            style={{
+                              whiteSpace: "pre-wrap",
+                              wordBreak: "break-word",
+                            }}
+                          >
+                            {msg.content}
+                          </span>
+                        )}
                         <small
                           className={`d-block mt-1 ${
                             isOwn ? "text-white-50" : "text-muted"
@@ -382,6 +528,30 @@ function Chat() {
 
               {/* Message input */}
               <Form onSubmit={handleSend} className="p-3 border-top">
+                {sharedRoute && (
+                  <div className="mb-2 p-2 rounded bg-light border d-flex align-items-center">
+                    <div className="flex-grow-1">
+                      <div className="fw-semibold">
+                        Sharing route: {sharedRoute.name}
+                      </div>
+                      {sharedRoute.distance_km !== undefined && (
+                        <small className="text-muted">
+                          {(sharedRoute.distance_km || 0).toFixed(1)} км
+                        </small>
+                      )}
+                    </div>
+                    <Button
+                      variant="outline-danger"
+                      size="sm"
+                      onClick={() => {
+                        setSharedRoute(null);
+                        localStorage.removeItem("routeToShare");
+                      }}
+                    >
+                      <i className="bi bi-x"></i>
+                    </Button>
+                  </div>
+                )}
                 <div className="d-flex gap-2">
                   <Form.Control
                     type="text"
@@ -393,7 +563,7 @@ function Chat() {
                   <Button
                     type="submit"
                     variant="success"
-                    disabled={sending || !newMessage.trim()}
+                    disabled={sending || (!newMessage.trim() && !sharedRoute) || sending}
                   >
                     {sending ? (
                       <Spinner animation="border" size="sm" />

@@ -222,11 +222,19 @@ function Favorites() {
   };
 
   const handleShareRoute = (route: RouteItem) => {
-    // Перейти до чату з попередньо заповненим повідомленням про маршрут
-    const params = new URLSearchParams({
-      shareRouteId: route.id,
-      shareRouteName: route.name,
-    });
+    // Зберегти дані маршруту для шарингу та відкрити чат
+    localStorage.setItem(
+      "routeToShare",
+      JSON.stringify({
+        id: route.id,
+        name: route.name,
+        description: route.description,
+        distance_km: route.distance_km,
+        points: route.points,
+        is_public: route.is_public,
+      })
+    );
+    const params = new URLSearchParams({ shareRoute: "1" });
     navigate(`/chat?${params.toString()}`);
   };
 
