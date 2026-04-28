@@ -45,211 +45,343 @@ interface RouteMapProps {
   panelExpanded?: boolean;
 }
 
+// ─── Кольори маркерів за типом POI ───────────────────────────────────────────
+const TYPE_COLOR_MAP: Record<string, string> = {
+  cafe:             "#ff8c00",
+  coffee:           "#d4813a",
+  restaurant:       "#ff5722",
+  park:             "#4caf50",
+  shop:             "#3f51b5",
+  supermarket:      "#3f51b5",
+  museum:           "#9c27b0",
+  library:          "#03a9f4",
+  place_of_worship: "#795548",
+  church:           "#795548",
+  beach:            "#ffc107",
+  lake:             "#2196f3",
+  river:            "#00bcd4",
+  fountain:         "#29b6f6",
+  viewpoint:        "#ff7043",
+  monument:         "#8d6e63",
+  playground:       "#ec407a",
+  cinema:           "#ab47bc",
+  theatre:          "#7e57c2",
+  pharmacy:         "#26a69a",
+  bakery:           "#ffca28",
+  zoo:              "#66bb6a",
+  attraction:       "#ef5350",
+  sport:            "#42a5f5",
+  hotel:            "#5c6bc0",
+  custom:           "#6c757d",
+};
+
+// ─── Іконки типів POI (emoji, відображаються на маркері) ─────────────────────
+const TYPE_EMOJI: Record<string, string> = {
+  cafe:             "☕",
+  coffee:           "☕",
+  restaurant:       "🍽️",
+  park:             "🌿",
+  shop:             "🛍️",
+  supermarket:      "🛒",
+  museum:           "🏛️",
+  library:          "📚",
+  place_of_worship: "⛪",
+  church:           "⛪",
+  beach:            "🏖️",
+  lake:             "🌊",
+  river:            "🌊",
+  fountain:         "⛲",
+  viewpoint:        "🔭",
+  monument:         "🗿",
+  playground:       "🎠",
+  cinema:           "🎬",
+  theatre:          "🎭",
+  pharmacy:         "💊",
+  bakery:           "🥐",
+  zoo:              "🦁",
+  attraction:       "⭐",
+  sport:            "⚽",
+  hotel:            "🏨",
+  custom:           "📍",
+};
+
+// ─── Компонент ────────────────────────────────────────────────────────────────
+
 const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
   ({ onRouteSummary, onRouteGenerated, panelExpanded = true }, ref) => {
     const mapContainerRef = useRef<HTMLDivElement>(null);
     const mapRef = useRef<mapboxgl.Map | null>(null);
     const markersRef = useRef<mapboxgl.Marker[]>([]);
-    const [userLocation, setUserLocation] = useState<[number, number] | null>(
-      null
-    );
+    const userMarkerRef = useRef<mapboxgl.Marker | null>(null);
+    const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
     const [isGenerating, setIsGenerating] = useState(false);
     const currentRouteRef = useRef<RouteResult | null>(null);
     const [selectedPoi, setSelectedPoi] = useState<RouteWaypoint | null>(null);
+    const [routeReadyToStart, setRouteReadyToStart] = useState(false);
+    const [navigationMode, setNavigationMode] = useState(false);
+    const [navMessage, setNavMessage] = useState<string | null>(null);
+    const [mapStyle, setMapStyle] = useState<string>("mapbox://styles/mapbox/navigation-day-v1");
+    const [timeOfDay, setTimeOfDay] = useState<"morning" | "afternoon" | "evening" | "night">("afternoon");
+    const [navDistance, setNavDistance] = useState<number | null>(null);
+    const [navInstruction, setNavInstruction] = useState<string | null>(null);
+    const [deviceHeading, setDeviceHeading] = useState<number>(0);
+    const navWatchIdRef = useRef<number | null>(null);
+    const compassWatchIdRef = useRef<number | null>(null);
 
-    // Ініціалізація карти
+    // ── Функція для визначення часу доби ────────────────────────────────────
+    const getTimeOfDayStyle = () => {
+      const hour = new Date().getHours();
+      let style: string;
+      let period: "morning" | "afternoon" | "evening" | "night";
+
+      if (hour >= 5 && hour < 12) {
+        // Ранок (5-11)
+        style = "mapbox://styles/mapbox/light-v11";
+        period = "morning";
+      } else if (hour >= 12 && hour < 17) {
+        // День (12-16)
+        style = "mapbox://styles/mapbox/streets-v12";
+        period = "afternoon";
+      } else if (hour >= 17 && hour < 21) {
+        // Вечір (17-20)
+        style = "mapbox://styles/mapbox/navigation-day-v1";
+        period = "evening";
+      } else {
+        // Ніч (21-4)
+        style = "mapbox://styles/mapbox/navigation-night-v1";
+        period = "night";
+      }
+
+      return { style, period };
+    };
+
+    // ── Ініціалізація карти ─────────────────────────────────────────────────
     useEffect(() => {
       if (!mapContainerRef.current) return;
 
       mapboxgl.accessToken = MAPBOX_TOKEN;
 
+      const { style, period } = getTimeOfDayStyle();
+      setMapStyle(style);
+      setTimeOfDay(period);
+
       const map = new mapboxgl.Map({
         container: mapContainerRef.current,
-        style: "mapbox://styles/mapbox/streets-v12",
-        center: [30.5234, 50.4501], // Київ за замовчуванням
+        style: style,
+        center: [30.5234, 50.4501],
         zoom: 13,
+        pitch: 0,
+        bearing: 0,
+        antialias: true,
+      });
+
+      map.on("load", () => {
+        const layers = map.getStyle().layers || [];
+        let labelLayerId: string | undefined;
+        for (const layer of layers) {
+          if (layer.type === "symbol" && layer.layout && (layer.layout as any)["text-field"]) {
+            labelLayerId = layer.id;
+            break;
+          }
+        }
+
+        map.addLayer(
+          {
+            id: "3d-buildings",
+            source: "composite",
+            "source-layer": "building",
+            filter: ["==", "extrude", "true"],
+            type: "fill-extrusion",
+            minzoom: 15,
+            paint: {
+              "fill-extrusion-color": "#c6c6c6",
+              "fill-extrusion-height": ["get", "height"],
+              "fill-extrusion-base": ["get", "min_height"],
+              "fill-extrusion-opacity": 0.65,
+            },
+          },
+          labelLayerId
+        );
       });
 
       mapRef.current = map;
-
-      // Додаємо навігаційні контроли
       map.addControl(new mapboxgl.NavigationControl(), "top-right");
 
-      // Запитуємо геолокацію при завантаженні
       if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
           (position) => {
             const { longitude, latitude } = position.coords;
             setUserLocation([longitude, latitude]);
-            map.flyTo({
-              center: [longitude, latitude],
-              zoom: 15,
-            });
-
-            // Додаємо маркер поточної позиції
-            new mapboxgl.Marker({ color: "#28a745" })
-              .setLngLat([longitude, latitude])
-              .setPopup(new mapboxgl.Popup().setHTML("<b>Ваша позиція</b>"))
-              .addTo(map);
+            map.flyTo({ center: [longitude, latitude], zoom: 15 });
+            addUserMarker(map, longitude, latitude);
           },
-          (error) => {
-            console.error("Помилка отримання геолокації:", error);
-          }
+          (error) => console.error("Помилка геолокації:", error)
         );
       }
 
-      return () => {
-        map.remove();
-      };
+      return () => { map.remove(); };
     }, []);
 
-    // Очищення маркерів
+    // ── Перевірка часу доби кожну хвилину ───────────────────────────────────
+    useEffect(() => {
+      const interval = setInterval(() => {
+        const { style, period } = getTimeOfDayStyle();
+        if (style !== mapStyle && mapRef.current) {
+          setMapStyle(style);
+          setTimeOfDay(period);
+          mapRef.current.setStyle(style);
+        }
+      }, 60000); // Перевіряємо кожну хвилину
+
+      return () => clearInterval(interval);
+    }, [mapStyle]);
+
+    // ── Маркер користувача ──────────────────────────────────────────────────
+    const addUserMarker = (map: mapboxgl.Map, lng: number, lat: number) => {
+      userMarkerRef.current?.remove();
+      const el = document.createElement("div");
+      el.style.cssText = `
+        width:16px;height:16px;border-radius:50%;
+        background:#28a745;border:3px solid #fff;
+        box-shadow:0 0 0 3px rgba(40,167,69,0.35);
+      `;
+      userMarkerRef.current = new mapboxgl.Marker({ element: el })
+        .setLngLat([lng, lat])
+        .setPopup(new mapboxgl.Popup().setHTML("<b>📍 Ваша позиція</b>"))
+        .addTo(map);
+    };
+
+    // ── Очищення маркерів ───────────────────────────────────────────────────
     const clearMarkers = () => {
-      markersRef.current.forEach((marker) => marker.remove());
+      markersRef.current.forEach((m) => m.remove());
       markersRef.current = [];
     };
 
-    // Очищення маршруту
+    // ── Очищення лінії маршруту ─────────────────────────────────────────────
     const clearRoute = () => {
-      if (!mapRef.current) return;
-
-      // Видаляємо джерело та шар маршруту, якщо вони існують
-      if (mapRef.current.getSource("route")) {
-        if (mapRef.current.getLayer("route-line")) {
-          mapRef.current.removeLayer("route-line");
-        }
-        mapRef.current.removeSource("route");
-      }
+      const map = mapRef.current;
+      if (!map) return;
+      ["route-line-border", "route-line"].forEach((id) => {
+        if (map.getLayer(id)) map.removeLayer(id);
+      });
+      if (map.getSource("route")) map.removeSource("route");
     };
 
-    // Відображення маршруту на карті
+    // ── Відображення маршруту ───────────────────────────────────────────────
     const displayRoute = (route: RouteResult) => {
-      if (!mapRef.current) {
-        console.warn("Map not ready yet");
-        return;
-      }
+      const map = mapRef.current;
+      if (!map) return;
 
       try {
         clearRoute();
         clearMarkers();
         setSelectedPoi(null);
-
-        // Конвертуємо координати в формат [lng, lat] для Mapbox
-        const coordinates = route.points.map(
-          (point) => [point[1], point[0]] as [number, number]
+        setRouteReadyToStart(true);
+        setNavigationMode(false);
+        setNavMessage(
+          route.waypoints?.[0]?.name
+            ? `Готово! Натисніть «Почати», щоб рухатися до ${route.waypoints[0].name}`
+            : "Готово! Натисніть «Почати», щоб розпочати навігацію"
         );
 
-        // Додаємо джерело даних для маршруту
-        mapRef.current.addSource("route", {
+        // Координати у форматі Mapbox [lng, lat]
+        const coordinates = route.points.map(
+          ([lat, lng]) => [lng, lat] as [number, number]
+        );
+
+        map.addSource("route", {
           type: "geojson",
           data: {
             type: "Feature",
-            geometry: {
-              type: "LineString",
-              coordinates: coordinates,
-            },
+            geometry: { type: "LineString", coordinates },
             properties: {},
           },
         });
 
-        // Додаємо шар для лінії маршруту
-        mapRef.current.addLayer({
+        // Тінь маршруту
+        map.addLayer({
+          id: "route-line-border",
+          type: "line",
+          source: "route",
+          layout: { "line-join": "round", "line-cap": "round" },
+          paint: {
+            "line-color": "#1a7a30",
+            "line-width": 7,
+            "line-opacity": 0.35,
+          },
+        });
+
+        // Основна лінія
+        map.addLayer({
           id: "route-line",
           type: "line",
           source: "route",
-          layout: {
-            "line-join": "round",
-            "line-cap": "round",
-          },
+          layout: { "line-join": "round", "line-cap": "round" },
           paint: {
             "line-color": "#28a745",
             "line-width": 4,
-            "line-opacity": 0.8,
+            "line-opacity": 0.9,
+            "line-dasharray": [0, 0],
           },
         });
 
-        // Додаємо маркер на початку маршруту
-        if (coordinates.length > 0 && mapRef.current) {
-          const startMarker = new mapboxgl.Marker({ color: "#28a745" })
+        // Стартовий маркер
+        if (coordinates.length > 0) {
+          const startEl = createNumberedMarker("🚶", "#28a745");
+          const startMarker = new mapboxgl.Marker({ element: startEl })
             .setLngLat(coordinates[0])
             .setPopup(new mapboxgl.Popup().setHTML("<b>Початок маршруту</b>"))
-            .addTo(mapRef.current);
+            .addTo(map);
           markersRef.current.push(startMarker);
         }
 
-        // Додаємо маркери для проміжних точок
-        if (
-          route.waypoints &&
-          Array.isArray(route.waypoints) &&
-          mapRef.current
-        ) {
-          route.waypoints.forEach((waypoint) => {
-            const [lat, lng] = waypoint.location;
-            const el = document.createElement("div");
-            el.style.width = "18px";
-            el.style.height = "18px";
-            el.style.borderRadius = "50%";
-            el.style.border = "2px solid #ffffff";
-            el.style.boxShadow = "0 0 4px rgba(0,0,0,0.3)";
-            el.style.cursor = "pointer";
+        // Маркери POI
+        route.waypoints.forEach((wp, idx) => {
+          const [lat, lng] = wp.location;
+          const color = TYPE_COLOR_MAP[wp.type] || TYPE_COLOR_MAP["custom"];
+          const emoji = TYPE_EMOJI[wp.type] || "📍";
 
-            // Колір залежить від типу POI
-            const typeColorMap: Record<string, string> = {
-              cafe: "#ff8c00",
-              restaurant: "#ff5722",
-              park: "#4caf50",
-              shop: "#3f51b5",
-              museum: "#9c27b0",
-              library: "#03a9f4",
-              place_of_worship: "#795548",
-              beach: "#ffc107",
-              lake: "#2196f3",
-              river: "#00bcd4",
-              custom: "#6c757d",
-            };
+          const el = createPoiMarker(emoji, color, idx + 1);
+          el.addEventListener("click", () => setSelectedPoi(wp));
+          el.title = wp.name;
 
-            const color =
-              typeColorMap[waypoint.type] || typeColorMap["custom"];
-            el.style.backgroundColor = color;
-            el.title = waypoint.name;
-
-            el.addEventListener("click", () => {
-              setSelectedPoi(waypoint);
-            });
-
-            const marker = new mapboxgl.Marker({ element: el })
-              .setLngLat([lng, lat])
-              .addTo(mapRef.current!);
-            markersRef.current.push(marker);
-          });
-        }
-
-        // Додаємо маркер на кінці маршруту
-        if (coordinates.length > 0 && mapRef.current) {
-          const endMarker = new mapboxgl.Marker({ color: "#dc3545" })
-            .setLngLat(coordinates[coordinates.length - 1])
-            .setPopup(new mapboxgl.Popup().setHTML("<b>Кінець маршруту</b>"))
-            .addTo(mapRef.current);
-          markersRef.current.push(endMarker);
-        }
-
-        // Вписуємо карту в межи маршруту
-        const bounds = new mapboxgl.LngLatBounds();
-        coordinates.forEach((coord) => {
-          bounds.extend(coord);
+          const marker = new mapboxgl.Marker({ element: el })
+            .setLngLat([lng, lat])
+            .addTo(map);
+          markersRef.current.push(marker);
         });
-        mapRef.current.fitBounds(bounds, { padding: 50 });
-      } catch (error) {
-        console.error("Error displaying route:", error);
+
+        // Кінцевий маркер (тільки для point_to_point)
+        if (coordinates.length > 1) {
+          const lastCoord = coordinates[coordinates.length - 1];
+          const firstCoord = coordinates[0];
+          const isLoop =
+            Math.abs(lastCoord[0] - firstCoord[0]) < 0.0001 &&
+            Math.abs(lastCoord[1] - firstCoord[1]) < 0.0001;
+
+          if (!isLoop) {
+            const endEl = createNumberedMarker("🏁", "#dc3545");
+            const endMarker = new mapboxgl.Marker({ element: endEl })
+              .setLngLat(lastCoord)
+              .setPopup(new mapboxgl.Popup().setHTML("<b>Кінець маршруту</b>"))
+              .addTo(map);
+            markersRef.current.push(endMarker);
+          }
+        }
+
+        // Вписуємо в bounds
+        const bounds = new mapboxgl.LngLatBounds();
+        coordinates.forEach((c) => bounds.extend(c));
+        map.fitBounds(bounds, { padding: 60 });
+      } catch (err) {
+        console.error("Помилка відображення маршруту:", err);
       }
     };
 
-    // Генерація маршруту
+    // ── Генерація маршруту ──────────────────────────────────────────────────
     const generateRoute = async (preferences: WalkPreferences) => {
       if (!userLocation) {
-        alert(
-          "Будь ласка, дозвольте доступ до геолокації або вкажіть вашу позицію"
-        );
+        alert("Будь ласка, дозвольте доступ до геолокації");
         return;
       }
 
@@ -258,203 +390,273 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
         const route = await generateRouteFromText(
           userLocation,
           preferences.prompt,
-          {
-            routeMode: preferences.routeMode,
-          }
+          { routeMode: preferences.routeMode }
         );
-        currentRouteRef.current = route;
 
+        currentRouteRef.current = route;
         displayRoute(route);
 
-        // Формуємо підсумок маршруту
-        const summary = `${route.distanceKm} км, ~${
-          route.estimatedTimeMinutes
-        } хв. ${
-          route.locations.length > 0
-            ? `Через: ${route.locations.join(", ")}`
-            : ""
+        const poiNames = route.waypoints.map((w) => w.name).join(", ");
+        const summary = `${route.distanceKm} км · ~${route.estimatedTimeMinutes} хв${
+          poiNames ? ` · ${poiNames}` : ""
         }`;
-        if (onRouteSummary) {
-          onRouteSummary(summary);
-        }
 
-        // Викликаємо callback
-        if (onRouteGenerated) {
-          onRouteGenerated({
-            distanceKm: route.distanceKm,
-            locations: route.locations,
-            prompt: preferences.prompt,
-            estimatedTimeMinutes: route.estimatedTimeMinutes,
-          });
-        }
+        onRouteSummary?.(summary);
+        onRouteGenerated?.({
+          distanceKm: route.distanceKm,
+          locations: route.locations,
+          prompt: preferences.prompt,
+          estimatedTimeMinutes: route.estimatedTimeMinutes,
+        });
       } catch (error: any) {
         console.error("Помилка генерації маршруту:", error);
-        alert(
-          error.message ||
-            "Не вдалося згенерувати маршрут. Спробуйте інший запит."
-        );
-        if (onRouteSummary) {
-          onRouteSummary("");
-        }
+        alert(error.message || "Не вдалося згенерувати маршрут. Спробуйте інший запит.");
+        onRouteSummary?.("");
       } finally {
         setIsGenerating(false);
       }
     };
 
-    // Завантаження збереженого маршруту
-    const loadSavedRoute = async (route: SavedRoute) => {
-      if (!mapRef.current) {
-        console.warn("Map not ready, waiting...");
-        return;
+    const degreesToRadians = (degrees: number) => (degrees * Math.PI) / 180;
+    const radiansToDegrees = (radians: number) => (radians * 180) / Math.PI;
+
+    const computeBearing = (
+      start: [number, number],
+      end: [number, number]
+    ) => {
+      const [lat1, lon1] = start;
+      const [lat2, lon2] = end;
+      const φ1 = degreesToRadians(lat1);
+      const φ2 = degreesToRadians(lat2);
+      const Δλ = degreesToRadians(lon2 - lon1);
+      const y = Math.sin(Δλ) * Math.cos(φ2);
+      const x =
+        Math.cos(φ1) * Math.sin(φ2) -
+        Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+      const brng = Math.atan2(y, x);
+      return (radiansToDegrees(brng) + 360) % 360;
+    };
+
+    const computeDistanceKm = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+      const R = 6371;
+      const dLat = ((lat2 - lat1) * Math.PI) / 180;
+      const dLng = ((lon2 - lon1) * Math.PI) / 180;
+      const a =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos((lat1 * Math.PI) / 180) *
+          Math.cos((lat2 * Math.PI) / 180) *
+          Math.sin(dLng / 2) ** 2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    };
+
+    const getTurnDirection = (bearing1: number, bearing2: number): string => {
+      let diff = (bearing2 - bearing1 + 360) % 360;
+      if (diff > 180) diff = 360 - diff;
+
+      if (diff < 30) return "прямо";
+      if (diff <= 90) return "вправо";
+      if (diff > 90 && diff < 180) return "різко вправо";
+      if (diff < -30 && diff >= -90) return "вліво";
+      if (diff <= -90) return "різко вліво";
+      return "поворот";
+    };
+
+    const startNavigation = () => {
+      const route = currentRouteRef.current;
+      const map = mapRef.current;
+      if (!route || !map || route.points.length < 2) return;
+
+      setNavigationMode(true);
+      setRouteReadyToStart(false);
+
+      // Запускаємо відслідкування геолокації в режимі навігації
+      if (navigator.geolocation) {
+        navWatchIdRef.current = navigator.geolocation.watchPosition(
+          (position) => {
+            const { longitude, latitude } = position.coords;
+            const currentPos: [number, number] = [latitude, longitude];
+
+            // Знаходимо найближчу точку маршруту
+            let closestIdx = 0;
+            let minDist = Infinity;
+            for (let i = 0; i < route.points.length; i++) {
+              const dist = computeDistanceKm(
+                latitude,
+                longitude,
+                route.points[i][0],
+                route.points[i][1]
+              );
+              if (dist < minDist) {
+                minDist = dist;
+                closestIdx = i;
+              }
+            }
+
+            // Показуємо наступну точку
+            const nextIdx = Math.min(closestIdx + 2, route.points.length - 1);
+            const [nextLat, nextLng] = route.points[nextIdx];
+            const nextWaypoint = route.waypoints.find((wp) => {
+              const wpDist = computeDistanceKm(
+                wp.location[0],
+                wp.location[1],
+                nextLat,
+                nextLng
+              );
+              return wpDist < 0.05;
+            });
+
+            // Обчислюємо відстань
+            const distToNextKm = computeDistanceKm(latitude, longitude, nextLat, nextLng);
+            const distMeters = Math.round(distToNextKm * 1000);
+
+            setNavDistance(distMeters);
+
+            // Обчислюємо напрям повороту
+            const bearingNow = computeBearing([latitude, longitude], [nextLat, nextLng]);
+            if (closestIdx < route.points.length - 1) {
+              const [curr2Lat, curr2Lng] = route.points[closestIdx + 1] || route.points[closestIdx];
+              const bearingNext = computeBearing([nextLat, nextLng], [curr2Lat, curr2Lng]);
+              const turnDir = getTurnDirection(bearingNow, bearingNext);
+
+              const waypointName = nextWaypoint?.name || "наступну точку";
+              setNavInstruction(`${turnDir} • ${waypointName}`);
+            }
+
+            // Оновлюємо позицію на карті і центруємо
+            if (map) {
+              addUserMarker(map, longitude, latitude);
+              map.setCenter([longitude, latitude]);
+              map.setBearing(bearingNow + deviceHeading);
+            }
+          },
+          (error) => console.error("Помилка GPS:", error),
+          { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }
+        );
       }
+
+      // Запускаємо компас для поворотів пристрою
+      if (
+        window.DeviceOrientationEvent &&
+        typeof (window.DeviceOrientationEvent as any).requestPermission === "function"
+      ) {
+        (window.DeviceOrientationEvent as any).requestPermission().then((permission: string) => {
+          if (permission === "granted") {
+            window.addEventListener("deviceorientationabsolute", (event: any) => {
+              setDeviceHeading(event.alpha || 0);
+            });
+          }
+        });
+      } else if (window.DeviceOrientationEvent) {
+        window.addEventListener("deviceorientation", (event: any) => {
+          setDeviceHeading(event.alpha || 0);
+        });
+      }
+
+      setNavMessage(`Навігація розпочата: рухайтесь по маршруту`);
+    };
+
+    const stopNavigation = () => {
+      const map = mapRef.current;
+      if (!map) return;
+
+      // Зупиняємо слухачі геолокації та орієнтації
+      if (navWatchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(navWatchIdRef.current);
+        navWatchIdRef.current = null;
+      }
+      if (window.DeviceOrientationEvent) {
+        window.removeEventListener("deviceorientation", null as any);
+        window.removeEventListener("deviceorientationabsolute", null as any);
+      }
+
+      map.easeTo({
+        pitch: 0,
+        bearing: 0,
+        duration: 1200,
+      });
+      setNavigationMode(false);
+      setRouteReadyToStart(false);
+      setNavMessage(null);
+      setNavDistance(null);
+      setNavInstruction(null);
+      setDeviceHeading(0);
+    };
+
+    // ── Завантаження збереженого маршруту ───────────────────────────────────
+    const loadSavedRoute = async (route: SavedRoute) => {
+      if (!mapRef.current) return;
 
       setIsGenerating(true);
       try {
-        // Перевіряємо наявність обов'язкових полів
         if (!route.points || !Array.isArray(route.points)) {
-          throw new Error("Invalid route: missing points");
+          throw new Error("Маршрут не містить точок");
         }
 
-        // Обробляємо різні формати даних маршруту
-        let distanceKm = 0;
-        let estimatedTimeMinutes = 0;
+        let distanceKm = route.statistics?.distanceKm
+          || (route as any).distance_km
+          || 0;
+        let estimatedTimeMinutes = route.statistics?.estimatedTimeMinutes
+          || (route as any).duration_minutes
+          || 0;
 
-        // Формат 1: є statistics об'єкт
-        if (route.statistics && typeof route.statistics === "object") {
-          distanceKm = route.statistics.distanceKm || 0;
-          estimatedTimeMinutes = route.statistics.estimatedTimeMinutes || 0;
-        }
-
-        // Формат 2: є distance_km поле (дані з localStorage)
-        if (
-          (distanceKm === 0 || estimatedTimeMinutes === 0) &&
-          (route as any).distance_km
-        ) {
-          distanceKm = (route as any).distance_km;
-          // Якщо duration_minutes відсутня, розраховуємо за середньою швидкістю 5 км/год
-          estimatedTimeMinutes =
-            (route as any).duration_minutes ||
-            Math.round((distanceKm / 5) * 60);
-        }
-
-        // Формат 3: розраховуємо距離 з координат, якщо вона відсутня
         if (distanceKm === 0 && route.points.length > 0) {
-          // Розраховуємо приблизну відстань через координати
-          // На коротких відстанях можемо використовувати просту формулу
-          const calculateDistance = (
-            lat1: number,
-            lon1: number,
-            lat2: number,
-            lon2: number
-          ) => {
-            // Haversine formula для розрахунку відстані між двома точками
-            const R = 6371; // Радіус Землі в км
-            const dLat = ((lat2 - lat1) * Math.PI) / 180;
-            const dLon = ((lon2 - lon1) * Math.PI) / 180;
-            const a =
-              Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-              Math.cos((lat1 * Math.PI) / 180) *
-                Math.cos((lat2 * Math.PI) / 180) *
-                Math.sin(dLon / 2) *
-                Math.sin(dLon / 2);
-            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-            return R * c;
-          };
-
-          // Сумуємо відстані між послідовними точками
           for (let i = 0; i < route.points.length - 1; i++) {
             const [lat1, lon1] = route.points[i];
             const [lat2, lon2] = route.points[i + 1];
-            distanceKm += calculateDistance(lat1, lon1, lat2, lon2);
+            distanceKm += haversineKm(lat1, lon1, lat2, lon2);
           }
-
-          // Якщо розрахована відстань невелика, встановимо мінімум 0.5 км
-          if (distanceKm < 0.5) {
-            distanceKm = 0.5;
-          }
-
-          // Розраховуємо час за середньою швидкістю 5 км/год
-          estimatedTimeMinutes = Math.round((distanceKm / 5) * 60);
+          distanceKm = Math.max(Math.round(distanceKm * 10) / 10, 0.5);
         }
-
-        if (distanceKm === 0) {
-          throw new Error("Invalid route: could not determine distance");
+        if (estimatedTimeMinutes === 0) {
+          estimatedTimeMinutes = Math.round((distanceKm / 5) * 60);
         }
 
         const routeResult: RouteResult = {
           points: route.points,
-          waypoints: route.waypoints || [],
-          distanceKm: Math.round(distanceKm * 10) / 10, // Округлюємо до 1 десяткового знаку
-          estimatedTimeMinutes: estimatedTimeMinutes,
-          locations: route.preferences?.locations || [],
+          waypoints: (route as any).waypoints || [],
+          distanceKm,
+          estimatedTimeMinutes,
+          locations: (route as any).locations || [],
         };
 
         currentRouteRef.current = routeResult;
         displayRoute(routeResult);
-
-        const summary = `${routeResult.distanceKm} км, ~${routeResult.estimatedTimeMinutes} хв.`;
-        if (onRouteSummary) {
-          onRouteSummary(summary);
-        }
+        onRouteSummary?.(`${distanceKm} км · ~${estimatedTimeMinutes} хв`);
       } catch (error) {
         console.error("Помилка завантаження маршруту:", error);
-        alert(
-          "Не вдалося завантажити маршрут: " +
-            (error instanceof Error ? error.message : String(error))
-        );
+        alert("Не вдалося завантажити маршрут: " + (error instanceof Error ? error.message : String(error)));
       } finally {
         setIsGenerating(false);
       }
     };
 
-    // Запит геолокації
+    // ── Геолокація ──────────────────────────────────────────────────────────
     const requestGeolocation = () => {
       if (!navigator.geolocation) {
         alert("Ваш браузер не підтримує геолокацію");
         return;
       }
-
       navigator.geolocation.getCurrentPosition(
         (position) => {
           const { longitude, latitude } = position.coords;
           setUserLocation([longitude, latitude]);
-
           if (mapRef.current) {
-            mapRef.current.flyTo({
-              center: [longitude, latitude],
-              zoom: 15,
-            });
-
-            // Очищаємо старі маркери
-            clearMarkers();
-
-            // Додаємо маркер поточної позиції
-            const marker = new mapboxgl.Marker({ color: "#28a745" })
-              .setLngLat([longitude, latitude])
-              .setPopup(new mapboxgl.Popup().setHTML("<b>Ваша позиція</b>"))
-              .addTo(mapRef.current);
-            markersRef.current.push(marker);
+            mapRef.current.flyTo({ center: [longitude, latitude], zoom: 15 });
+            addUserMarker(mapRef.current, longitude, latitude);
           }
         },
-        (error) => {
-          console.error("Помилка отримання геолокації:", error);
-          alert(
-            "Не вдалося отримати вашу позицію. Перевірте налаштування браузера."
-          );
-        }
+        () => alert("Не вдалося отримати позицію. Перевірте налаштування браузера.")
       );
     };
 
-    // Перерендер карти при зміні panelExpanded
+    // ── Resize при зміні панелі ─────────────────────────────────────────────
     useEffect(() => {
       if (mapRef.current) {
-        setTimeout(() => {
-          mapRef.current?.resize();
-        }, 300); // Затримка для синхронізації з анімацією
+        setTimeout(() => mapRef.current?.resize(), 300);
       }
     }, [panelExpanded]);
 
-    // Експортуємо методи через ref
+    // ── Ref API ─────────────────────────────────────────────────────────────
     useImperativeHandle(ref, () => ({
       generateRoute,
       loadSavedRoute,
@@ -464,11 +666,15 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
         clearRoute();
         clearMarkers();
         currentRouteRef.current = null;
-      setSelectedPoi(null);
+        setSelectedPoi(null);
+        setRouteReadyToStart(false);
+        setNavigationMode(false);
+        setNavMessage(null);
       },
       isGenerating,
     }));
 
+    // ── Рендер ──────────────────────────────────────────────────────────────
     return (
       <>
         <div
@@ -482,6 +688,100 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
             transition: "height 0.3s ease-in-out",
           }}
         />
+
+        {(routeReadyToStart || navigationMode) && (
+          <div
+            style={{
+              position: "fixed",
+              left: 16,
+              top: 76,
+              right: "auto",
+              bottom: "auto",
+              zIndex: 1200,
+              display: "flex",
+              justifyContent: "flex-start",
+              pointerEvents: "none",
+            }}
+          >
+            <div
+              style={{
+                backgroundColor: navigationMode ? "rgba(0,0,0,0.85)" : "rgba(0,0,0,0.72)",
+                color: "#fff",
+                borderRadius: 16,
+                padding: navigationMode ? "16px 20px" : "14px 18px",
+                minWidth: navigationMode ? 360 : 280,
+                maxWidth: 480,
+                boxShadow: "0 16px 40px rgba(0,0,0,0.3)",
+                pointerEvents: "auto",
+              }}
+            >
+              {routeReadyToStart && !navigationMode ? (
+                <>
+                  <div style={{ marginBottom: 10, fontWeight: 700, fontSize: "1rem" }}>
+                    Маршрут готовий
+                  </div>
+                  <div style={{ marginBottom: 14, color: "#d1d5db" }}>
+                    {navMessage || "Натисніть «Почати», щоб перейти в режим навігації"}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={startNavigation}
+                    style={{
+                      width: "100%",
+                      border: "none",
+                      borderRadius: 12,
+                      padding: "10px 0",
+                      backgroundColor: "#28a745",
+                      color: "#fff",
+                      fontWeight: 700,
+                      fontSize: "0.95rem",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Почати маршрут
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div style={{ marginBottom: 8, fontWeight: 700, fontSize: "1.2rem", lineHeight: 1.2 }}>
+                    {navDistance !== null && (
+                      <>
+                        <span style={{ color: "#4ade80", fontSize: "1.4rem", fontWeight: 800 }}>
+                          {navDistance < 1000 ? `${navDistance}м` : `${(navDistance / 1000).toFixed(1)}км`}
+                        </span>
+                        {navInstruction && (
+                          <div style={{ marginTop: 4, fontSize: "0.95rem", color: "#e5e7eb" }}>
+                            {navInstruction}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={stopNavigation}
+                    style={{
+                      marginTop: 12,
+                      width: "100%",
+                      border: "1px solid rgba(255,255,255,0.18)",
+                      borderRadius: 12,
+                      padding: "8px 0",
+                      backgroundColor: "transparent",
+                      color: "#fff",
+                      fontWeight: 600,
+                      fontSize: "0.9rem",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Завершити навігацію
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Картка вибраного POI */}
         {selectedPoi && (
           <div
             style={{
@@ -490,29 +790,20 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
               bottom: panelExpanded ? 200 : 80,
               zIndex: 1200,
               backgroundColor: "#ffffff",
-              borderRadius: 12,
-              boxShadow: "0 4px 16px rgba(0,0,0,0.2)",
-              padding: 12,
-              maxWidth: 280,
+              borderRadius: 14,
+              boxShadow: "0 6px 24px rgba(0,0,0,0.18)",
+              padding: "14px 16px",
+              maxWidth: 290,
+              minWidth: 220,
+              borderLeft: `4px solid ${TYPE_COLOR_MAP[selectedPoi.type] || "#6c757d"}`,
             }}
           >
-            <div className="d-flex justify-content-between align-items-start mb-2">
+            <div className="d-flex justify-content-between align-items-start mb-1">
               <div>
-                <div
-                  style={{
-                    fontWeight: 600,
-                    fontSize: "0.95rem",
-                  }}
-                >
-                  {selectedPoi.name}
+                <div style={{ fontWeight: 700, fontSize: "0.95rem", lineHeight: 1.3 }}>
+                  {TYPE_EMOJI[selectedPoi.type] || "📍"} {selectedPoi.name}
                 </div>
-                <div
-                  style={{
-                    fontSize: "0.8rem",
-                    color: "#6c757d",
-                    textTransform: "capitalize",
-                  }}
-                >
+                <div style={{ fontSize: "0.75rem", color: "#888", textTransform: "capitalize", marginTop: 2 }}>
                   {selectedPoi.type}
                 </div>
               </div>
@@ -520,82 +811,45 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
                 type="button"
                 onClick={() => setSelectedPoi(null)}
                 style={{
-                  border: "none",
-                  background: "transparent",
-                  cursor: "pointer",
-                  padding: 0,
-                  marginLeft: 8,
+                  border: "none", background: "transparent",
+                  cursor: "pointer", padding: "2px 4px", marginLeft: 8,
+                  color: "#999", fontSize: "1rem",
                 }}
                 aria-label="Закрити"
               >
-                <i className="bi bi-x-lg" />
+                ✕
               </button>
             </div>
+
             {selectedPoi.photoUrl && (
-              <div
-                style={{
-                  marginBottom: 8,
-                  borderRadius: 8,
-                  overflow: "hidden",
-                  maxHeight: 140,
-                }}
-              >
-                <img
-                  src={selectedPoi.photoUrl}
-                  alt={selectedPoi.name}
-                  style={{ width: "100%", objectFit: "cover" }}
-                />
+              <div style={{ marginBottom: 8, borderRadius: 8, overflow: "hidden", maxHeight: 140 }}>
+                <img src={selectedPoi.photoUrl} alt={selectedPoi.name} style={{ width: "100%", objectFit: "cover" }} />
               </div>
             )}
+
             {selectedPoi.address && (
-              <div
-                style={{
-                  fontSize: "0.8rem",
-                  color: "#495057",
-                  marginBottom: 4,
-                }}
-              >
-                <i className="bi bi-geo-alt me-1" />
-                {selectedPoi.address}
+              <div style={{ fontSize: "0.78rem", color: "#555", marginBottom: 4 }}>
+                📌 {selectedPoi.address}
               </div>
             )}
+
             {typeof selectedPoi.rating === "number" && (
-              <div
-                style={{
-                  fontSize: "0.8rem",
-                  color: "#343a40",
-                  marginBottom: 4,
-                }}
-              >
-                <i className="bi bi-star-fill text-warning me-1" />
-                {selectedPoi.rating.toFixed(1)}
-                {typeof selectedPoi.userRatingsTotal === "number" &&
-                  selectedPoi.userRatingsTotal > 0 && (
-                    <span className="text-muted ms-1">
-                      ({selectedPoi.userRatingsTotal})
-                    </span>
-                  )}
+              <div style={{ fontSize: "0.78rem", color: "#333", marginBottom: 4 }}>
+                ⭐ {selectedPoi.rating.toFixed(1)}
+                {typeof selectedPoi.userRatingsTotal === "number" && selectedPoi.userRatingsTotal > 0 && (
+                  <span style={{ color: "#999", marginLeft: 4 }}>({selectedPoi.userRatingsTotal})</span>
+                )}
               </div>
             )}
+
             {selectedPoi.description && (
-              <div
-                style={{
-                  fontSize: "0.8rem",
-                  color: "#495057",
-                  marginTop: 4,
-                }}
-              >
+              <div style={{ fontSize: "0.78rem", color: "#555", marginTop: 6 }}>
                 {selectedPoi.description}
               </div>
             )}
+
             {selectedPoi.source && (
-              <div
-                style={{
-                  fontSize: "0.7rem",
-                  color: "#adb5bd",
-                  marginTop: 6,
-                }}
-              >
+              <div style={{ fontSize: "0.68rem", color: "#bbb", marginTop: 8 }}>
                 Джерело: {selectedPoi.source}
               </div>
             )}
@@ -607,5 +861,43 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
 );
 
 RouteMap.displayName = "RouteMap";
-
 export default RouteMap;
+
+// ─── Допоміжні функції для маркерів ──────────────────────────────────────────
+
+function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function createPoiMarker(emoji: string, color: string, num: number): HTMLDivElement {
+  const el = document.createElement("div");
+  el.style.cssText = `
+    width:32px;height:32px;border-radius:50%;
+    background:${color};border:2.5px solid #fff;
+    box-shadow:0 2px 8px rgba(0,0,0,0.3);
+    cursor:pointer;display:flex;align-items:center;
+    justify-content:center;font-size:14px;
+  `;
+  el.textContent = emoji;
+  el.title = `Точка ${num}`;
+  return el;
+}
+
+function createNumberedMarker(emoji: string, color: string): HTMLDivElement {
+  const el = document.createElement("div");
+  el.style.cssText = `
+    width:36px;height:36px;border-radius:50%;
+    background:${color};border:3px solid #fff;
+    box-shadow:0 2px 10px rgba(0,0,0,0.25);
+    display:flex;align-items:center;justify-content:center;
+    font-size:16px;
+  `;
+  el.textContent = emoji;
+  return el;
+}
