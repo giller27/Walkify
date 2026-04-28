@@ -124,9 +124,9 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
     const [timeOfDay, setTimeOfDay] = useState<"morning" | "afternoon" | "evening" | "night">("afternoon");
     const [navDistance, setNavDistance] = useState<number | null>(null);
     const [navInstruction, setNavInstruction] = useState<string | null>(null);
-    const [deviceHeading, setDeviceHeading] = useState<number>(0);
     const navWatchIdRef = useRef<number | null>(null);
-    const compassWatchIdRef = useRef<number | null>(null);
+    const currentHeadingRef = useRef<number>(0);
+    const deviceOrientationHandlerRef = useRef<((event: DeviceOrientationEvent) => void) | null>(null);
 
     // ── Функція для визначення часу доби ────────────────────────────────────
     const getTimeOfDayStyle = () => {
@@ -468,13 +468,43 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
 
       setNavigationMode(true);
       setRouteReadyToStart(false);
+      currentHeadingRef.current = 0;
+
+      // Запускаємо слухач орієнтації пристрою
+      const handleDeviceOrientation = (event: DeviceOrientationEvent) => {
+        if (event.alpha !== null) {
+          currentHeadingRef.current = event.alpha || 0;
+        }
+      };
+      deviceOrientationHandlerRef.current = handleDeviceOrientation;
+
+      // Спочатку запитуємо дозвіл на iOS 13+
+      if (
+        window.DeviceOrientationEvent &&
+        typeof (window.DeviceOrientationEvent as any).requestPermission === "function"
+      ) {
+        (window.DeviceOrientationEvent as any)
+          .requestPermission()
+          .then((permission: string) => {
+            if (permission === "granted") {
+              window.addEventListener("deviceorientationabsolute", handleDeviceOrientation);
+              console.log("✓ DeviceOrientation permission granted");
+            } else {
+              console.log("✗ DeviceOrientation permission denied");
+            }
+          })
+          .catch((err: Error) => console.error("DeviceOrientation error:", err));
+      } else if (window.DeviceOrientationEvent) {
+        // Для браузерів без явного запиту дозволу (Android)
+        window.addEventListener("deviceorientation", handleDeviceOrientation);
+        console.log("✓ DeviceOrientation listener added");
+      }
 
       // Запускаємо відслідкування геолокації в режимі навігації
       if (navigator.geolocation) {
         navWatchIdRef.current = navigator.geolocation.watchPosition(
           (position) => {
             const { longitude, latitude } = position.coords;
-            const currentPos: [number, number] = [latitude, longitude];
 
             // Знаходимо найближчу точку маршруту
             let closestIdx = 0;
@@ -522,34 +552,19 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
               setNavInstruction(`${turnDir} • ${waypointName}`);
             }
 
-            // Оновлюємо позицію на карті і центруємо
+            // Оновлюємо позицію на карті і центруємо з урахуванням компаса
             if (map) {
               addUserMarker(map, longitude, latitude);
               map.setCenter([longitude, latitude]);
-              map.setBearing(bearingNow + deviceHeading);
+              // Використовуємо bearingNow як основу та добавляємо поворот пристрою
+              const finalBearing = (bearingNow + currentHeadingRef.current) % 360;
+              map.setBearing(finalBearing);
+              map.setPitch(60);
             }
           },
           (error) => console.error("Помилка GPS:", error),
           { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }
         );
-      }
-
-      // Запускаємо компас для поворотів пристрою
-      if (
-        window.DeviceOrientationEvent &&
-        typeof (window.DeviceOrientationEvent as any).requestPermission === "function"
-      ) {
-        (window.DeviceOrientationEvent as any).requestPermission().then((permission: string) => {
-          if (permission === "granted") {
-            window.addEventListener("deviceorientationabsolute", (event: any) => {
-              setDeviceHeading(event.alpha || 0);
-            });
-          }
-        });
-      } else if (window.DeviceOrientationEvent) {
-        window.addEventListener("deviceorientation", (event: any) => {
-          setDeviceHeading(event.alpha || 0);
-        });
       }
 
       setNavMessage(`Навігація розпочата: рухайтесь по маршруту`);
@@ -559,15 +574,20 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
       const map = mapRef.current;
       if (!map) return;
 
-      // Зупиняємо слухачі геолокації та орієнтації
+      // Зупиняємо слухачі геолокації
       if (navWatchIdRef.current !== null) {
         navigator.geolocation.clearWatch(navWatchIdRef.current);
         navWatchIdRef.current = null;
       }
-      if (window.DeviceOrientationEvent) {
-        window.removeEventListener("deviceorientation", null as any);
-        window.removeEventListener("deviceorientationabsolute", null as any);
+
+      // Зупиняємо слухачі орієнтації
+      if (deviceOrientationHandlerRef.current) {
+        window.removeEventListener("deviceorientation", deviceOrientationHandlerRef.current);
+        window.removeEventListener("deviceorientationabsolute", deviceOrientationHandlerRef.current);
+        deviceOrientationHandlerRef.current = null;
       }
+
+      currentHeadingRef.current = 0;
 
       map.easeTo({
         pitch: 0,
@@ -579,7 +599,6 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
       setNavMessage(null);
       setNavDistance(null);
       setNavInstruction(null);
-      setDeviceHeading(0);
     };
 
     // ── Завантаження збереженого маршруту ───────────────────────────────────
@@ -656,6 +675,19 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
       }
     }, [panelExpanded]);
 
+    // ── Cleanup при unmount ─────────────────────────────────────────────────
+    useEffect(() => {
+      return () => {
+        if (navWatchIdRef.current !== null) {
+          navigator.geolocation.clearWatch(navWatchIdRef.current);
+        }
+        if (deviceOrientationHandlerRef.current) {
+          window.removeEventListener("deviceorientation", deviceOrientationHandlerRef.current);
+          window.removeEventListener("deviceorientationabsolute", deviceOrientationHandlerRef.current);
+        }
+      };
+    }, []);
+
     // ── Ref API ─────────────────────────────────────────────────────────────
     useImperativeHandle(ref, () => ({
       generateRoute,
@@ -663,12 +695,14 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
       requestGeolocation,
       getCurrentRoute: () => currentRouteRef.current,
       clearCurrentRoute: () => {
+        if (navigationMode) {
+          stopNavigation();
+        }
         clearRoute();
         clearMarkers();
         currentRouteRef.current = null;
         setSelectedPoi(null);
         setRouteReadyToStart(false);
-        setNavigationMode(false);
         setNavMessage(null);
       },
       isGenerating,
