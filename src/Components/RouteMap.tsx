@@ -126,7 +126,7 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
     const [navInstruction, setNavInstruction] = useState<string | null>(null);
     const navWatchIdRef = useRef<number | null>(null);
     const currentHeadingRef = useRef<number>(0);
-    const deviceOrientationHandlerRef = useRef<((event: DeviceOrientationEvent) => void) | null>(null);
+    const deviceOrientationHandlerRef = useRef<EventListener | null>(null);
 
     // ── Функція для визначення часу доби ────────────────────────────────────
     const getTimeOfDayStyle = () => {
@@ -471,9 +471,10 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
       currentHeadingRef.current = 0;
 
       // Запускаємо слухач орієнтації пристрою
-      const handleDeviceOrientation = (event: DeviceOrientationEvent) => {
-        if (event.alpha !== null) {
-          currentHeadingRef.current = event.alpha || 0;
+      const handleDeviceOrientation: EventListener = (event) => {
+        const orientationEvent = event as DeviceOrientationEvent;
+        if (orientationEvent.alpha !== null) {
+          currentHeadingRef.current = orientationEvent.alpha || 0;
         }
       };
       deviceOrientationHandlerRef.current = handleDeviceOrientation;
