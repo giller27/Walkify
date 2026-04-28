@@ -126,6 +126,9 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
     const [navInstruction, setNavInstruction] = useState<string | null>(null);
     const navWatchIdRef = useRef<number | null>(null);
     const currentHeadingRef = useRef<number>(0);
+    const currentNavTargetIndexRef = useRef<number>(1);
+    const lastKnownPositionRef = useRef<[number, number] | null>(null);
+    const smoothedMapBearingRef = useRef<number>(0);
     const deviceOrientationHandlerRef = useRef<EventListener | null>(null);
 
     // ── Функція для визначення часу доби ────────────────────────────────────
@@ -449,6 +452,114 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
       return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     };
 
+    const normalizeBearing = (bearing: number): number => ((bearing % 360) + 360) % 360;
+
+    const getBearingDelta = (from: number, to: number): number =>
+      ((to - from + 540) % 360) - 180;
+
+    const getNavigationTurnDirection = (bearing1: number, bearing2: number): string => {
+      const diff = getBearingDelta(bearing1, bearing2);
+      const absDiff = Math.abs(diff);
+
+      if (absDiff < 20) return "прямо";
+      if (diff >= 0) return absDiff < 110 ? "вправо" : "різко вправо";
+      return absDiff < 110 ? "вліво" : "різко вліво";
+    };
+
+    const updateNavigationCamera = (
+      map: mapboxgl.Map,
+      longitude: number,
+      latitude: number
+    ) => {
+      const targetBearing = normalizeBearing(currentHeadingRef.current);
+      const currentBearing = smoothedMapBearingRef.current;
+      const nextBearing = normalizeBearing(
+        currentBearing + getBearingDelta(currentBearing, targetBearing) * 0.2
+      );
+
+      smoothedMapBearingRef.current = nextBearing;
+      map.easeTo({
+        center: [longitude, latitude],
+        bearing: nextBearing,
+        pitch: 60,
+        duration: 250,
+        essential: true,
+      });
+    };
+
+    const updateNavigationState = (
+      route: RouteResult,
+      map: mapboxgl.Map,
+      longitude: number,
+      latitude: number
+    ) => {
+      if (route.points.length < 2) return;
+
+      lastKnownPositionRef.current = [longitude, latitude];
+
+      let closestIdx = 0;
+      let minDist = Infinity;
+      for (let i = 0; i < route.points.length; i++) {
+        const dist = computeDistanceKm(
+          latitude,
+          longitude,
+          route.points[i][0],
+          route.points[i][1]
+        );
+        if (dist < minDist) {
+          minDist = dist;
+          closestIdx = i;
+        }
+      }
+
+      const lastPointIdx = route.points.length - 1;
+      let targetIdx = Math.max(
+        currentNavTargetIndexRef.current,
+        Math.min(closestIdx + 1, lastPointIdx)
+      );
+
+      while (targetIdx < lastPointIdx) {
+        const [targetLat, targetLng] = route.points[targetIdx];
+        const targetDistanceMeters =
+          computeDistanceKm(latitude, longitude, targetLat, targetLng) * 1000;
+        if (targetDistanceMeters > 18) break;
+        targetIdx += 1;
+      }
+
+      currentNavTargetIndexRef.current = targetIdx;
+
+      const [targetLat, targetLng] = route.points[targetIdx];
+      const distanceMeters = Math.round(
+        computeDistanceKm(latitude, longitude, targetLat, targetLng) * 1000
+      );
+      setNavDistance(distanceMeters);
+
+      const previousIdx = Math.max(targetIdx - 1, 0);
+      const nextIdx = Math.min(targetIdx + 1, lastPointIdx);
+      const incomingBearing = computeBearing(route.points[previousIdx], route.points[targetIdx]);
+      const outgoingBearing = computeBearing(route.points[targetIdx], route.points[nextIdx]);
+      const turnDirection =
+        targetIdx >= lastPointIdx
+          ? "прямо до фінішу"
+          : getNavigationTurnDirection(incomingBearing, outgoingBearing);
+
+      const nextWaypoint = route.waypoints.find((wp) => {
+        const waypointDistance = computeDistanceKm(
+          wp.location[0],
+          wp.location[1],
+          targetLat,
+          targetLng
+        );
+        return waypointDistance < 0.05;
+      });
+      const waypointName =
+        nextWaypoint?.name || (targetIdx >= lastPointIdx ? "фінішу" : "наступної точки");
+      setNavInstruction(`${turnDirection} • ${waypointName}`);
+
+      addUserMarker(map, longitude, latitude);
+      updateNavigationCamera(map, longitude, latitude);
+    };
+
     const getTurnDirection = (bearing1: number, bearing2: number): string => {
       let diff = (bearing2 - bearing1 + 360) % 360;
       if (diff > 180) diff = 360 - diff;
@@ -469,17 +580,30 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
       setNavigationMode(true);
       setRouteReadyToStart(false);
       currentHeadingRef.current = 0;
+      currentNavTargetIndexRef.current = 1;
+      lastKnownPositionRef.current = null;
+      smoothedMapBearingRef.current = normalizeBearing(map.getBearing());
 
-      // Запускаємо слухач орієнтації пристрою
       const handleDeviceOrientation: EventListener = (event) => {
         const orientationEvent = event as DeviceOrientationEvent;
-        if (orientationEvent.alpha !== null) {
-          currentHeadingRef.current = orientationEvent.alpha || 0;
+        const compassHeading = (orientationEvent as DeviceOrientationEvent & { webkitCompassHeading?: number }).webkitCompassHeading;
+        const rawHeading =
+          typeof compassHeading === "number"
+            ? compassHeading
+            : orientationEvent.alpha !== null
+              ? 360 - orientationEvent.alpha
+              : null;
+
+        if (rawHeading !== null) {
+          currentHeadingRef.current = normalizeBearing(rawHeading);
+          if (lastKnownPositionRef.current) {
+            const [lastLongitude, lastLatitude] = lastKnownPositionRef.current;
+            updateNavigationCamera(map, lastLongitude, lastLatitude);
+          }
         }
       };
       deviceOrientationHandlerRef.current = handleDeviceOrientation;
 
-      // Спочатку запитуємо дозвіл на iOS 13+
       if (
         window.DeviceOrientationEvent &&
         typeof (window.DeviceOrientationEvent as any).requestPermission === "function"
@@ -489,86 +613,29 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
           .then((permission: string) => {
             if (permission === "granted") {
               window.addEventListener("deviceorientationabsolute", handleDeviceOrientation);
-              console.log("✓ DeviceOrientation permission granted");
+              console.log("DeviceOrientation permission granted");
             } else {
-              console.log("✗ DeviceOrientation permission denied");
+              console.log("DeviceOrientation permission denied");
             }
           })
           .catch((err: Error) => console.error("DeviceOrientation error:", err));
       } else if (window.DeviceOrientationEvent) {
-        // Для браузерів без явного запиту дозволу (Android)
         window.addEventListener("deviceorientation", handleDeviceOrientation);
-        console.log("✓ DeviceOrientation listener added");
+        console.log("DeviceOrientation listener added");
       }
 
-      // Запускаємо відслідкування геолокації в режимі навігації
       if (navigator.geolocation) {
         navWatchIdRef.current = navigator.geolocation.watchPosition(
           (position) => {
             const { longitude, latitude } = position.coords;
-
-            // Знаходимо найближчу точку маршруту
-            let closestIdx = 0;
-            let minDist = Infinity;
-            for (let i = 0; i < route.points.length; i++) {
-              const dist = computeDistanceKm(
-                latitude,
-                longitude,
-                route.points[i][0],
-                route.points[i][1]
-              );
-              if (dist < minDist) {
-                minDist = dist;
-                closestIdx = i;
-              }
-            }
-
-            // Показуємо наступну точку
-            const nextIdx = Math.min(closestIdx + 2, route.points.length - 1);
-            const [nextLat, nextLng] = route.points[nextIdx];
-            const nextWaypoint = route.waypoints.find((wp) => {
-              const wpDist = computeDistanceKm(
-                wp.location[0],
-                wp.location[1],
-                nextLat,
-                nextLng
-              );
-              return wpDist < 0.05;
-            });
-
-            // Обчислюємо відстань
-            const distToNextKm = computeDistanceKm(latitude, longitude, nextLat, nextLng);
-            const distMeters = Math.round(distToNextKm * 1000);
-
-            setNavDistance(distMeters);
-
-            // Обчислюємо напрям повороту
-            const bearingNow = computeBearing([latitude, longitude], [nextLat, nextLng]);
-            if (closestIdx < route.points.length - 1) {
-              const [curr2Lat, curr2Lng] = route.points[closestIdx + 1] || route.points[closestIdx];
-              const bearingNext = computeBearing([nextLat, nextLng], [curr2Lat, curr2Lng]);
-              const turnDir = getTurnDirection(bearingNow, bearingNext);
-
-              const waypointName = nextWaypoint?.name || "наступну точку";
-              setNavInstruction(`${turnDir} • ${waypointName}`);
-            }
-
-            // Оновлюємо позицію на карті і центруємо з урахуванням компаса
-            if (map) {
-              addUserMarker(map, longitude, latitude);
-              map.setCenter([longitude, latitude]);
-              // Використовуємо bearingNow як основу та добавляємо поворот пристрою
-              const finalBearing = (bearingNow + currentHeadingRef.current) % 360;
-              map.setBearing(finalBearing);
-              map.setPitch(60);
-            }
+            updateNavigationState(route, map, longitude, latitude);
           },
-          (error) => console.error("Помилка GPS:", error),
+          (error) => console.error("GPS error:", error),
           { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }
         );
       }
 
-      setNavMessage(`Навігація розпочата: рухайтесь по маршруту`);
+      setNavMessage(`????????? ?????????: ????????? ?? ????????`);
     };
 
     const stopNavigation = () => {
@@ -589,6 +656,9 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
       }
 
       currentHeadingRef.current = 0;
+      currentNavTargetIndexRef.current = 1;
+      lastKnownPositionRef.current = null;
+      smoothedMapBearingRef.current = 0;
 
       map.easeTo({
         pitch: 0,
