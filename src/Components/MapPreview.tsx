@@ -1,8 +1,5 @@
 import React, { useEffect, useRef } from "react";
-import mapboxgl from "mapbox-gl";
-import "mapbox-gl/dist/mapbox-gl.css";
-
-const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN;
+import { loadGoogleMaps } from "../services/googleMapsLoader";
 
 interface MapPreviewProps {
   points?: [number, number][];
@@ -16,95 +13,96 @@ const MapPreview: React.FC<MapPreviewProps> = ({
   height = 200,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<mapboxgl.Map | null>(null);
+  const mapRef = useRef<any>(null);
+  const routeLineRef = useRef<any>(null);
+  const markersRef = useRef<any[]>([]);
 
   useEffect(() => {
-    if (!containerRef.current || !points || points.length < 2) {
-      return;
-    }
+    let disposed = false;
 
-    // Очистити попередню карту
-    if (mapRef.current) {
-      mapRef.current.remove();
-      mapRef.current = null;
-    }
+    const clearMapOverlays = () => {
+      routeLineRef.current?.setMap(null);
+      routeLineRef.current = null;
+      markersRef.current.forEach((marker) => marker.setMap(null));
+      markersRef.current = [];
+    };
 
-    // Створити нову карту
-    const map = new mapboxgl.Map({
-      container: containerRef.current,
-      accessToken: MAPBOX_TOKEN,
-      style: "mapbox://styles/mapbox/streets-v12",
-      center: [points[0][1], points[0][0]], // [lng, lat]
-      zoom: 13,
-      interactive: false,
-    });
+    const renderPreview = async () => {
+      if (!containerRef.current || !points || points.length < 2) {
+        return;
+      }
 
-    mapRef.current = map;
+      try {
+        const maps = await loadGoogleMaps();
+        if (disposed || !containerRef.current) return;
 
-    map.on("load", () => {
-      // Конвертувати points в формат для Mapbox [lng, lat]
-      const coordinates = points.map((p) => [p[1], p[0]] as [number, number]);
+        const path = points.map(([lat, lng]) => ({ lat, lng }));
+        const map =
+          mapRef.current ||
+          new maps.Map(containerRef.current, {
+            center: path[0],
+            zoom: 13,
+            disableDefaultUI: true,
+            draggable: false,
+            keyboardShortcuts: false,
+            scrollwheel: false,
+            clickableIcons: false,
+          });
 
-      // Додати джерело даних для маршруту
-      map.addSource("route", {
-        type: "geojson",
-        data: {
-          type: "Feature",
-          geometry: {
-            type: "LineString",
-            coordinates: coordinates,
-          },
-          properties: {},
-        },
-      });
+        mapRef.current = map;
+        clearMapOverlays();
 
-      // Додати шар для лінії маршруту
-      map.addLayer({
-        id: "route-line",
-        type: "line",
-        source: "route",
-        layout: {
-          "line-join": "round",
-          "line-cap": "round",
-        },
-        paint: {
-          "line-color": isPublic ? "#28a745" : "#6c757d",
-          "line-width": 3,
-          "line-opacity": 0.8,
-        },
-      });
+        routeLineRef.current = new maps.Polyline({
+          map,
+          path,
+          strokeColor: isPublic ? "#28a745" : "#6c757d",
+          strokeOpacity: 0.85,
+          strokeWeight: 4,
+        });
 
-      // Додати маркери на початку та кінці
-      new mapboxgl.Marker({
-        color: "#28a745",
-        scale: 0.8,
-      })
-        .setLngLat([points[0][1], points[0][0]])
-        .addTo(map);
+        markersRef.current.push(
+          new maps.Marker({
+            map,
+            position: path[0],
+            title: "Початок маршруту",
+            icon: {
+              path: maps.SymbolPath.CIRCLE,
+              scale: 6,
+              fillColor: "#28a745",
+              fillOpacity: 1,
+              strokeColor: "#ffffff",
+              strokeWeight: 2,
+            },
+          }),
+          new maps.Marker({
+            map,
+            position: path[path.length - 1],
+            title: "Кінець маршруту",
+            icon: {
+              path: maps.SymbolPath.CIRCLE,
+              scale: 6,
+              fillColor: "#dc3545",
+              fillOpacity: 1,
+              strokeColor: "#ffffff",
+              strokeWeight: 2,
+            },
+          })
+        );
 
-      new mapboxgl.Marker({
-        color: "#dc3545",
-        scale: 0.8,
-      })
-        .setLngLat([
-          points[points.length - 1][1],
-          points[points.length - 1][0],
-        ])
-        .addTo(map);
+        const bounds = new maps.LatLngBounds();
+        path.forEach((point) => bounds.extend(point));
+        map.fitBounds(bounds, 10);
+      } catch (error) {
+        console.error("Помилка превʼю Google Maps:", error);
+      }
+    };
 
-      // Вписати карту в межі маршруту
-      const bounds = new mapboxgl.LngLatBounds();
-      coordinates.forEach((coord) => {
-        bounds.extend(coord as [number, number]);
-      });
-      map.fitBounds(bounds, { padding: 10 });
-    });
+    renderPreview();
 
     return () => {
-      if (mapRef.current) {
-        mapRef.current.remove();
-        mapRef.current = null;
-      }
+      disposed = true;
+      clearMapOverlays();
+      mapRef.current = null;
     };
   }, [points, isPublic]);
 

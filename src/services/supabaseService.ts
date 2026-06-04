@@ -53,7 +53,7 @@ export interface SavedRoute {
     userRatingsTotal?: number;
     photoUrl?: string;
     description?: string;
-    source?: 'mapbox' | 'osm' | 'google_like' | 'custom';
+    source?: 'google' | 'mapbox' | 'osm' | 'google_like' | 'custom';
   }[];
   statistics: {
     distanceKm: number;
