@@ -1,76 +1,82 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useCallback } from "react";
 import RouteMap, { RouteMapRef } from "../Components/RouteMap";
-import WalkPreferences from "../Components/WalkPreferences"; // Імпортуйте саме так
+import WalkPreferences from "../Components/WalkPreferences";
 import WalkFiltersMenu from "../Components/WalkFiltersMenu";
-import { generateRouteByFilters, RouteFilterOptions } from "../services/routeService";
+import { generateRouteByFilters, RouteFilterOptions, RouteDestination } from "../services/routeService";
 
 const Home: React.FC = () => {
   const mapRef = useRef<RouteMapRef>(null);
   const [activeTab, setActiveTab] = useState<"filters" | "text">("filters");
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [routeSummary, setRouteSummary] = useState<string>("");
+  const [destination, setDestination] = useState<RouteDestination | null>(null);
+  const [isPickingOnMap, setIsPickingOnMap] = useState(false);
 
-  // Обробник для генерації суто за фільтрами
+  const handleDestinationPicked = useCallback((coords: [number, number], address: string) => {
+    setDestination({ coords, address, name: address });
+    setIsPickingOnMap(false);
+  }, []);
+
   const handleFilterGeneration = async (filterOptions: RouteFilterOptions) => {
     if (!mapRef.current) return;
-    
-    setIsGenerating(true);
-    setRouteSummary("Пошук оптимальних локацій у Google Places...");
-    
-    try {
-      // Отримуємо поточну позицію через API браузера:
-      navigator.geolocation.getCurrentPosition(async (position) => {
-        const userLoc: [number, number] = [position.coords.longitude, position.coords.latitude];
-        
-        try {
-          const generatedRoute = await generateRouteByFilters(userLoc, filterOptions);
-          
-          // Рендеримо готовий маршрут на мапі через існуючий метод loadSavedRoute
-          if (mapRef.current) {
-            (mapRef.current as any).loadSavedRoute({
-              points: generatedRoute.points,
-              statistics: {
-                distanceKm: generatedRoute.distanceKm,
-                estimatedTimeMinutes: generatedRoute.estimatedTimeMinutes
-              },
-              waypoints: generatedRoute.waypoints,
-              locations: generatedRoute.locations,
-              difficulty: generatedRoute.difficulty
-            });
-            
-            const diffStr = generatedRoute.difficulty ? ` · ${generatedRoute.difficulty}` : '';
-            setRouteSummary(`${generatedRoute.distanceKm} км · ~${generatedRoute.estimatedTimeMinutes} хв${diffStr}`);
-          }
-        } catch (err: any) {
-          alert(err.message || "Помилка побудови геометрії шляху.");
-          setRouteSummary("");
-        } finally {
-          setIsGenerating(false);
-        }
-      }, () => {
-        alert("Будь ласка, увімкніть геолокацію в браузері.");
-        setIsGenerating(false);
-        setRouteSummary("");
-      });
 
-    } catch (error) {
-      console.error(error);
+    setIsGenerating(true);
+    setRouteSummary("Шукаємо місця та будуємо маршрут...");
+
+    navigator.geolocation.getCurrentPosition(async (position) => {
+      const userLoc: [number, number] = [position.coords.longitude, position.coords.latitude];
+
+      try {
+        const options: RouteFilterOptions = {
+          ...filterOptions,
+          destination: filterOptions.routeMode === 'point_to_point'
+            ? (destination?.coords
+                ? destination
+                : filterOptions.destination)
+            : undefined,
+        };
+
+        const generatedRoute = await generateRouteByFilters(userLoc, options);
+
+        if (mapRef.current) {
+          (mapRef.current as any).loadSavedRoute({
+            points: generatedRoute.points,
+            statistics: {
+              distanceKm: generatedRoute.distanceKm,
+              estimatedTimeMinutes: generatedRoute.estimatedTimeMinutes,
+            },
+            waypoints: generatedRoute.waypoints,
+            locations: generatedRoute.locations,
+            difficulty: generatedRoute.difficulty,
+          });
+
+          const diffStr = generatedRoute.difficulty ? ` · ${generatedRoute.difficulty}` : '';
+          setRouteSummary(
+            `${generatedRoute.distanceKm} км · ~${generatedRoute.estimatedTimeMinutes} хв (ціль: ${filterOptions.targetTimeMinutes} хв)${diffStr}`
+          );
+        }
+      } catch (err: any) {
+        alert(err.message || "Помилка побудови маршруту.");
+        setRouteSummary("");
+      } finally {
+        setIsGenerating(false);
+      }
+    }, () => {
+      alert("Будь ласка, увімкніть геолокацію в браузері.");
       setIsGenerating(false);
       setRouteSummary("");
-    }
+    });
   };
 
   return (
     <div className="container-fluid p-0 position-relative" style={{ height: "calc(100vh - 120px)" }}>
       <div className="row g-0 h-100">
-        
-        {/* Бічна панель управління */}
+
         <div className="col-12 col-md-4 p-3 bg-light border-end overflow-y-auto" style={{ zIndex: 10, maxHeight: "100%" }}>
-          
-          {/* Перемикач режимів введення */}
+
           <ul className="nav nav-pills nav-fill mb-3 bg-white p-1 rounded-3 border">
             <li className="nav-item">
-              <button 
+              <button
                 className={`nav-link rounded-2 fw-semibold py-2 ${activeTab === "filters" ? "active bg-success text-white" : "text-secondary"}`}
                 onClick={() => setActiveTab("filters")}
               >
@@ -78,7 +84,7 @@ const Home: React.FC = () => {
               </button>
             </li>
             <li className="nav-item">
-              <button 
+              <button
                 className={`nav-link rounded-2 fw-semibold py-2 ${activeTab === "text" ? "active bg-success text-white" : "text-secondary"}`}
                 onClick={() => setActiveTab("text")}
               >
@@ -87,29 +93,33 @@ const Home: React.FC = () => {
             </li>
           </ul>
 
-          {/* Відображення відповідного інтерфейсу */}
           {activeTab === "filters" ? (
-            <WalkFiltersMenu onGenerate={handleFilterGeneration} isGenerating={isGenerating} />
+            <WalkFiltersMenu
+              onGenerate={handleFilterGeneration}
+              isGenerating={isGenerating}
+              destination={destination}
+              onDestinationChange={setDestination}
+              onPickOnMap={() => setIsPickingOnMap(prev => !prev)}
+              isPickingOnMap={isPickingOnMap}
+            />
           ) : (
             <WalkPreferences
-  onGenerate={(prefs: any) => {
-    if (mapRef.current) {
-      mapRef.current.generateRoute(prefs);
-    }
-  }}
-  isGenerating={isGenerating}
-  // Додаємо обов'язкові пропси, яких не вистачало:
-  onRequestGeolocation={() => {
-    if (mapRef.current) {
-      mapRef.current.requestGeolocation();
-    }
-  }}
-  // Додаємо необов'язкові пропси, щоб уникнути інших помилок:
-  routeSummary={routeSummary}
-  hasRoute={!!mapRef.current?.getCurrentRoute()} // Перевірка чи є маршрут
-  onSaveRoute={() => console.log("Save clicked")} // Можна додати свою логіку
-  onClearRoute={() => mapRef.current?.clearCurrentRoute()}
-/>
+              onGenerate={(prefs: any) => {
+                if (mapRef.current) {
+                  mapRef.current.generateRoute(prefs);
+                }
+              }}
+              isGenerating={isGenerating}
+              onRequestGeolocation={() => {
+                if (mapRef.current) {
+                  mapRef.current.requestGeolocation();
+                }
+              }}
+              routeSummary={routeSummary}
+              hasRoute={!!mapRef.current?.getCurrentRoute()}
+              onSaveRoute={() => console.log("Save clicked")}
+              onClearRoute={() => mapRef.current?.clearCurrentRoute()}
+            />
           )}
 
           {routeSummary && (
@@ -119,12 +129,13 @@ const Home: React.FC = () => {
           )}
         </div>
 
-        {/* Карта займає залишок екрану */}
         <div className="col-12 col-md-8 position-relative h-100">
-          <RouteMap 
-            ref={mapRef} 
-            panelExpanded={true} 
+          <RouteMap
+            ref={mapRef}
+            panelExpanded={true}
             onRouteSummary={(sum) => setRouteSummary(sum)}
+            pickDestinationMode={isPickingOnMap}
+            onDestinationPicked={handleDestinationPicked}
           />
         </div>
 

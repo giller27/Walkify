@@ -1,6 +1,10 @@
 /// <reference types="google.maps" />
 
-import { selectBestWaypoints, sequenceWaypoints } from './waypointOptimizer';
+import {
+  selectBestWaypoints, sequenceWaypoints,
+  getDistanceKm, timeToDistanceKm,
+} from './waypointOptimizer';
+import { geocodeAddress } from './placesService';
 import { calculateElevationProfile, getTerrainInfo, calculateRouteDifficulty } from './routeOptions';
 import type { RouteDifficulty, ElevationProfile } from '../types/routeEnhancements';
 
@@ -33,6 +37,7 @@ export interface RouteWaypoint {
   photoUrl?: string;
   description?: string;
   source?: 'google' | 'custom';
+  externalId?: string;
 }
 
 export interface RouteResult {
@@ -46,12 +51,17 @@ export interface RouteResult {
   terrainTypes?: string[];
 }
 
+export interface RouteDestination {
+  coords?: [number, number]; // [lng, lat]
+  address?: string;
+  name?: string;
+}
+
 export interface RouteFilterOptions {
   routeMode: "exploration" | "point_to_point";
   categories: string[];
-  desiredPoiCount: number;
-  targetDistanceKm: number;
-  minRating: number;
+  targetTimeMinutes: number;
+  destination?: RouteDestination;
 }
 
 const EXTENDED_POI_TYPES = [
@@ -140,53 +150,97 @@ async function findPlacesByGoogleType(center: [number, number], type: string, ra
   });
 }
 
-// ─── Новий метод: Генерація за фільтрами ────────────────────────────────────────
+// ─── Послідовний пошук POI: одна категорія за раз, від кожної зупинки ─────────
 
-export async function generateRouteByFilters(
-  userLocation: [number, number],
-  options: RouteFilterOptions
-): Promise<RouteResult> {
-  const { categories, desiredPoiCount, routeMode, minRating } = options;
+function placeKey(place: Place): string {
+  return place.externalId || `${place.name}_${place.coordinates[0].toFixed(3)}`;
+}
 
+async function findSequentialWaypoints(
+  startLocation: [number, number],
+  options: {
+    categories: string[];
+    targetTimeMinutes: number;
+    routeMode: 'exploration' | 'point_to_point';
+    endLocation?: [number, number];
+  }
+): Promise<Place[]> {
+  const { categories, targetTimeMinutes, routeMode, endLocation } = options;
   const searchCategories = categories.length > 0 ? categories : ['park', 'cafe', 'tourist_attraction'];
-  const allResults: Place[] = [];
-  const searchRadius = Math.max(2000, options.targetDistanceKm * 600); 
+  const maxAllowedKm = timeToDistanceKm(targetTimeMinutes) * 1.15;
+  const isCircular = routeMode === 'exploration';
+  const finalEnd = endLocation ?? startLocation;
 
-  for (const cat of searchCategories) {
-    const places = await findPlacesByGoogleType(userLocation, cat, searchRadius);
-    allResults.push(...places);
-  }
+  const selected: Place[] = [];
+  const visited = new Set<string>();
+  let current = startLocation;
+  let totalDistKm = 0;
+  let categoryIndex = 0;
+  const MAX_STOPS = 20;
 
-  const uniquePlaces = new Map<string, Place>();
-  for (const place of allResults) {
-    const key = place.externalId || `${place.name}_${place.coordinates[0].toFixed(3)}`;
-    if (!uniquePlaces.has(key) && (place.rating || 0) >= minRating) {
-      uniquePlaces.set(key, place);
+  while (selected.length < MAX_STOPS && totalDistKm < maxAllowedKm) {
+    const remainingBudgetKm = maxAllowedKm - totalDistKm;
+    if (remainingBudgetKm < 0.15) break;
+
+    const targetCategory = searchCategories[categoryIndex % searchCategories.length];
+    categoryIndex++;
+
+    const searchRadiusM = Math.max(
+      400,
+      Math.min(2500, Math.floor(remainingBudgetKm * 1000 * 0.5))
+    );
+
+    const batch = await findPlacesByGoogleType(current, targetCategory, searchRadiusM);
+
+    const candidates: Place[] = [];
+    for (const place of batch) {
+      const key = placeKey(place);
+      if (!visited.has(key)) {
+        candidates.push(place);
+      }
     }
+
+    if (candidates.length === 0) continue;
+
+    candidates.sort((a, b) => {
+      const distA = getDistanceKm(current, a.coordinates);
+      const distB = getDistanceKm(current, b.coordinates);
+      if (Math.abs(distA - distB) < 0.05) {
+        return (b.rating || 0) - (a.rating || 0);
+      }
+      return distA - distB;
+    });
+
+    let picked: Place | null = null;
+    for (const candidate of candidates) {
+      const legKm = getDistanceKm(current, candidate.coordinates);
+      const returnKm = isCircular
+        ? getDistanceKm(candidate.coordinates, startLocation)
+        : getDistanceKm(candidate.coordinates, finalEnd);
+
+      const fitsBudget = isCircular
+        ? totalDistKm + legKm + returnKm <= maxAllowedKm
+        : totalDistKm + legKm + returnKm <= maxAllowedKm;
+
+      if (fitsBudget) {
+        picked = candidate;
+        break;
+      }
+    }
+
+    if (!picked) continue;
+
+    visited.add(placeKey(picked));
+    totalDistKm += getDistanceKm(current, picked.coordinates);
+    selected.push(picked);
+    current = picked.coordinates;
   }
 
-  const filteredPois = Array.from(uniquePlaces.values());
+  return selected;
+}
 
-  if (filteredPois.length === 0) {
-    throw new Error(`Не знайдено місць із рейтингом від ${minRating}★ у радіусі ${searchRadius}м. Спробуйте обрати інші категорії.`);
-  }
-
-  const potentialDestination = filteredPois[filteredPois.length - 1];
-  const targetEndCoord = routeMode === 'exploration' ? userLocation : potentialDestination.coordinates;
-
-  const selectedPois = selectBestWaypoints(
-    filteredPois, 
-    Math.min(desiredPoiCount, filteredPois.length), 
-    userLocation, 
-    targetEndCoord
-  );
-
-  const sequencedPois = sequenceWaypoints(selectedPois, userLocation, targetEndCoord);
-  const waypointCoords: [number, number][] = sequencedPois.map(p => p.coordinates);
-
-  const route = await buildRoute(userLocation, targetEndCoord, waypointCoords);
-
-  route.waypoints = sequencedPois.map(wp => {
+function placesToWaypoints(places: Place[]): RouteWaypoint[] {
+  return places.map(wp => {
     const terrain = getTerrainInfo(wp.type);
     return {
       location: [wp.coordinates[1], wp.coordinates[0]] as [number, number],
@@ -195,12 +249,162 @@ export async function generateRouteByFilters(
       address: wp.address,
       rating: wp.rating,
       userRatingsTotal: wp.userRatingsTotal,
+      photoUrl: wp.photoUrl,
+      externalId: wp.externalId,
       description: `Покриття: ${terrain.surfaceType} | Мальовничість: ${terrain.scenicScore}`,
-      source: 'google'
+      source: 'google' as const,
     };
   });
+}
 
-  route.locations = sequencedPois.map(wp => wp.name);
+async function buildRouteWithTimeFill(
+  userLocation: [number, number],
+  options: RouteFilterOptions,
+  endCoord: [number, number],
+  initialPois: Place[]
+): Promise<RouteResult> {
+  const minTimeMinutes = options.targetTimeMinutes * 0.85;
+  let pois = [...initialPois];
+  let route: RouteResult | null = null;
+  let attempts = 0;
+
+  while (attempts < 6) {
+    const waypointCoords = options.routeMode === 'exploration'
+      ? pois.map(p => p.coordinates)
+      : pois.map(p => p.coordinates);
+
+    route = await buildRoute(userLocation, endCoord, waypointCoords);
+    route.waypoints = placesToWaypoints(pois);
+    route.locations = pois.map(wp => wp.name);
+
+    if (route.estimatedTimeMinutes >= minTimeMinutes || pois.length >= 20) break;
+
+    const extra = await findSequentialWaypoints(
+      pois.length > 0 ? pois[pois.length - 1].coordinates : userLocation,
+      {
+        categories: options.categories,
+        targetTimeMinutes: options.targetTimeMinutes - route.estimatedTimeMinutes,
+        routeMode: options.routeMode,
+        endLocation: endCoord,
+      }
+    );
+
+    const existingKeys = new Set(pois.map(placeKey));
+    const newOnes = extra.filter(p => !existingKeys.has(placeKey(p)));
+    if (newOnes.length === 0) break;
+
+    pois = [...pois, ...newOnes];
+    attempts++;
+  }
+
+  return route!;
+}
+
+// ─── Новий метод: Генерація за фільтрами ────────────────────────────────────────
+
+export async function resolveDestination(
+  userLocation: [number, number],
+  destination?: RouteDestination
+): Promise<{ coords: [number, number]; name: string; address?: string } | null> {
+  if (!destination) return null;
+
+  if (destination.coords) {
+    return {
+      coords: destination.coords,
+      name: destination.name || destination.address || 'Пункт призначення',
+      address: destination.address,
+    };
+  }
+
+  if (destination.address) {
+    const geocoded = await geocodeAddress(destination.address);
+    if (!geocoded) return null;
+    return {
+      coords: geocoded.coords,
+      name: destination.name || geocoded.formattedAddress,
+      address: geocoded.formattedAddress,
+    };
+  }
+
+  return null;
+}
+
+export async function generateRouteByFilters(
+  userLocation: [number, number],
+  options: RouteFilterOptions
+): Promise<RouteResult> {
+  const { routeMode } = options;
+
+  if (routeMode === 'point_to_point' && (!options.destination?.coords && !options.destination?.address)) {
+    throw new Error('Для прямого маршруту вкажіть адресу або оберіть точку на карті.');
+  }
+
+  let endCoord: [number, number];
+  let destinationPlace: Place | null = null;
+
+  if (routeMode === 'exploration') {
+    endCoord = userLocation;
+  } else {
+    const resolved = await resolveDestination(userLocation, options.destination);
+    if (!resolved) {
+      throw new Error('Не вдалося знайти вказану адресу. Перевірте правильність написання.');
+    }
+    endCoord = resolved.coords;
+    destinationPlace = {
+      name: resolved.name,
+      coordinates: resolved.coords,
+      type: 'custom',
+      address: resolved.address,
+      source: 'custom',
+    };
+  }
+
+  const sequencedPois = await findSequentialWaypoints(userLocation, {
+    categories: options.categories,
+    targetTimeMinutes: options.targetTimeMinutes,
+    routeMode,
+    endLocation: endCoord,
+  });
+
+  if (sequencedPois.length === 0 && routeMode === 'exploration') {
+    throw new Error(
+      `Не знайдено місць обраних категорій за ~${options.targetTimeMinutes} хв прогулянки. Спробуйте інші категорії або збільште час.`
+    );
+  }
+
+  if (sequencedPois.length === 0 && routeMode === 'point_to_point') {
+    const directRoute = await buildRoute(userLocation, endCoord, []);
+    if (destinationPlace) {
+      directRoute.waypoints = [{
+        location: [destinationPlace.coordinates[1], destinationPlace.coordinates[0]],
+        name: destinationPlace.name,
+        type: 'custom',
+        address: destinationPlace.address,
+        source: 'custom',
+      }];
+      directRoute.locations = [destinationPlace.name];
+    }
+    return directRoute;
+  }
+
+  const route = await buildRouteWithTimeFill(
+    userLocation,
+    options,
+    endCoord,
+    sequencedPois
+  );
+
+  if (destinationPlace) {
+    route.waypoints.push({
+      location: [destinationPlace.coordinates[1], destinationPlace.coordinates[0]],
+      name: destinationPlace.name,
+      type: 'custom',
+      address: destinationPlace.address,
+      source: 'custom',
+    });
+    route.locations.push(destinationPlace.name);
+  }
+
   return route;
 }
 
@@ -325,40 +529,16 @@ export async function generateExplorationRoute(
   userLocation: [number, number], 
   options: {
     types: string[];
-    desiredPoiCount?: number;
-    targetDistanceKm?: number;
+    targetTimeMinutes?: number;
   }
 ): Promise<RouteResult> {
-  const { types, desiredPoiCount = 6 } = options;
-  const nearbyPois = await searchComprehensivePois(userLocation, types, 3000);
+  const { types, targetTimeMinutes = 60 } = options;
 
-  if (nearbyPois.length === 0) {
-    throw new Error('Поруч не вдалося знайти цікаві місця для прогулянки. Спробуйте інший район.');
-  }
-
-  const destinationPoi = nearbyPois[nearbyPois.length - 1]; 
-  const selectedPois = selectBestWaypoints(nearbyPois, desiredPoiCount, userLocation, destinationPoi.coordinates);
-  const sequencedPois = sequenceWaypoints(selectedPois, userLocation, userLocation); 
-  const waypointCoords: [number, number][] = sequencedPois.map(p => p.coordinates);
-
-  const route = await buildRoute(userLocation, userLocation, waypointCoords); 
-
-  route.waypoints = sequencedPois.map(wp => {
-    const terrain = getTerrainInfo(wp.type);
-    return {
-      location: [wp.coordinates[1], wp.coordinates[0]] as [number, number],
-      name: wp.name,
-      type: wp.type as PoiCategory,
-      address: wp.address,
-      rating: wp.rating,
-      userRatingsTotal: wp.userRatingsTotal,
-      description: `Покриття: ${terrain.surfaceType} | Мальовничість: ${terrain.scenicScore}`,
-      source: 'google'
-    };
+  return generateRouteByFilters(userLocation, {
+    routeMode: 'exploration',
+    categories: types,
+    targetTimeMinutes,
   });
-
-  route.locations = sequencedPois.map(wp => wp.name);
-  return route;
 }
 
 export async function generateRouteFromText(
@@ -374,8 +554,7 @@ export async function generateRouteFromText(
     const allTypes = [...new Set([...parsed.waypointTypes, parsed.destinationType].filter(Boolean) as string[])];
     return generateExplorationRoute(userLocation, {
       types: allTypes,
-      desiredPoiCount: parsed.desiredPoiCount,
-      targetDistanceKm: parsed.targetDistance,
+      targetTimeMinutes: parsed.targetTimeMinutes ?? 60,
     });
   }
 
@@ -422,9 +601,8 @@ export function parseRouteRequest(text: string): {
   destinationName: string | null;
   waypointTypes: string[];
   waypointNames: string[];
-  targetDistance?: number;
+  targetTimeMinutes?: number;
   isExplorationMode?: boolean;
-  desiredPoiCount?: number;
 } {
   const lowerText = text.toLowerCase();
   let destinationType: string | null = null;
@@ -459,11 +637,11 @@ export function parseRouteRequest(text: string): {
 
   const isExplorationMode = lowerText.includes('прогулянка') || lowerText.includes('прогулятись');
 
-  let desiredPoiCount = 6;
-  const countMatch = text.match(/(\d+)\s*(зупинок|місць|точок)/i);
-  if (countMatch && countMatch[1]) {
-    desiredPoiCount = Math.max(2, Math.min(parseInt(countMatch[1]), 10));
+  let targetTimeMinutes: number | undefined;
+  const timeMatch = text.match(/(\d+)\s*(хв|хвилин|min)/i);
+  if (timeMatch?.[1]) {
+    targetTimeMinutes = Math.max(15, Math.min(parseInt(timeMatch[1]), 240));
   }
 
-  return { destinationType, destinationName, waypointTypes, waypointNames, isExplorationMode, desiredPoiCount };
+  return { destinationType, destinationName, waypointTypes, waypointNames, isExplorationMode, targetTimeMinutes };
 }

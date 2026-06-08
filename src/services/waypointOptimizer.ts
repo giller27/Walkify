@@ -10,6 +10,91 @@ function getDistance(lat1: number, lon1: number, lat2: number, lon2: number): nu
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+export function getDistanceKm(from: [number, number], to: [number, number]): number {
+  return getDistance(from[1], from[0], to[1], to[0]);
+}
+
+function placeKey(place: Place): string {
+  return place.externalId || `${place.name}_${place.coordinates[0].toFixed(3)}`;
+}
+
+export const WALKING_SPEED_KMH = 4.8;
+const MAX_TIME_TOLERANCE = 1.15;
+
+export function timeToDistanceKm(minutes: number): number {
+  return (minutes / 60) * WALKING_SPEED_KMH;
+}
+
+export function distanceToTimeMinutes(km: number): number {
+  return Math.round((km / WALKING_SPEED_KMH) * 60);
+}
+
+// Послідовний вибір: від поточної точки — найближчий POI, з урахуванням ліміту часу
+export function selectSequentialWaypoints(
+  allPois: Place[],
+  start: [number, number],
+  end: [number, number],
+  targetTimeMinutes: number,
+  isCircular: boolean,
+  categories: string[] = []
+): Place[] {
+  const maxAllowedKm = timeToDistanceKm(targetTimeMinutes) * MAX_TIME_TOLERANCE;
+  const remaining = [...allPois];
+  const selected: Place[] = [];
+  let current = start;
+  let totalDistKm = 0;
+  let categoryIndex = 0;
+  const MAX_STOPS = 20;
+
+  while (selected.length < MAX_STOPS && remaining.length > 0 && totalDistKm < maxAllowedKm) {
+    let pool = remaining;
+    if (categories.length > 0) {
+      const targetCat = categories[categoryIndex % categories.length];
+      categoryIndex++;
+      pool = remaining.filter(p => p.type === targetCat);
+      if (pool.length === 0) continue;
+    }
+
+    pool.sort((a, b) => {
+      const distA = getDistanceKm(current, a.coordinates);
+      const distB = getDistanceKm(current, b.coordinates);
+      if (Math.abs(distA - distB) < 0.05) {
+        return (b.rating || 0) - (a.rating || 0);
+      }
+      return distA - distB;
+    });
+
+    let picked: Place | null = null;
+    for (const candidate of pool) {
+      const legKm = getDistanceKm(current, candidate.coordinates);
+      const returnKm = isCircular
+        ? getDistanceKm(candidate.coordinates, start)
+        : getDistanceKm(candidate.coordinates, end);
+      const projectedKm = totalDistKm + legKm + (isCircular ? returnKm : 0);
+
+      if (isCircular) {
+        if (projectedKm <= maxAllowedKm) {
+          picked = candidate;
+          break;
+        }
+      } else if (totalDistKm + legKm <= maxAllowedKm) {
+        picked = candidate;
+        break;
+      }
+    }
+
+    if (!picked) break;
+
+    const pickedIndex = remaining.findIndex(p => placeKey(p) === placeKey(picked!));
+    if (pickedIndex !== -1) remaining.splice(pickedIndex, 1);
+    totalDistKm += getDistanceKm(current, picked.coordinates);
+    selected.push(picked);
+    current = picked.coordinates;
+  }
+
+  return selected;
+}
+
 // Tier 1: Select best POIs based on quality and geographic distribution
 export function selectBestWaypoints(
   allPois: Place[], 
