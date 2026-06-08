@@ -5,10 +5,11 @@ import { reverseGeocode } from "../services/placesService";
 import type { SavedRoute } from "../services/supabaseService";
 import type { RouteDifficulty } from "../types/routeEnhancements";
 import {
-  findClosestPointIndex,
   findCurrentStepIndex,
+  findRouteProgress,
   calculateRemainingRouteStats,
   formatRemainingRouteSummary,
+  getStepRemainingToEnd,
 } from "../utils/routeTracking";
 import PlaceInfoCard from "./PlaceInfoCard";
 import NavigationStepsPanel from "./NavigationStepsPanel";
@@ -122,6 +123,10 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
     const [isGenerating, setIsGenerating] = useState(false);
     const [selectedPoi, setSelectedPoi] = useState<{ waypoint: RouteWaypoint; stopNumber?: number } | null>(null);
     const [currentStepIndex, setCurrentStepIndex] = useState(0);
+    const [currentStepRemaining, setCurrentStepRemaining] = useState<{
+      distanceMeters: number;
+      durationSeconds: number;
+    } | null>(null);
     const [hasActiveRoute, setHasActiveRoute] = useState(false);
     const currentRouteRef = useRef<RouteResult | null>(null);
     const maxProgressIndexRef = useRef(0);
@@ -163,14 +168,28 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
       const route = currentRouteRef.current;
       if (!route?.points.length) return;
 
-      const closestIdx = findClosestPointIndex(route.points, userLngLat);
-      const idx = Math.max(maxProgressIndexRef.current, closestIdx);
+      const progress = findRouteProgress(
+        route.points,
+        userLngLat,
+        maxProgressIndexRef.current
+      );
+
+      if (progress.distanceFromRouteKm > 0.12) return;
+
+      const idx = Math.max(maxProgressIndexRef.current, progress.segmentIndex);
       maxProgressIndexRef.current = idx;
 
+      const snap = { lat: progress.snappedPoint[0], lng: progress.snappedPoint[1] };
       const toLatLng = (p: [number, number]) => ({ lat: p[0], lng: p[1] });
 
-      const traveledPath = route.points.slice(0, idx + 1).map(toLatLng);
-      const remainingPath = route.points.slice(idx).map(toLatLng);
+      const traveledPath = [
+        ...route.points.slice(0, idx + 1).map(toLatLng),
+        snap,
+      ];
+      const remainingPath = [
+        snap,
+        ...route.points.slice(idx + 1).map(toLatLng),
+      ];
 
       traveledLineRef.current?.setPath(traveledPath);
       remainingLineRef.current?.setPath(remainingPath);
@@ -184,6 +203,10 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
           route.points.length
         );
         setCurrentStepIndex(stepIdx);
+        const step = route.steps[stepIdx];
+        if (step) {
+          setCurrentStepRemaining(getStepRemainingToEnd(step, userLngLat));
+        }
       }
 
       const stats = calculateRemainingRouteStats(route, idx, stepIdx);
@@ -264,6 +287,7 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
       markersRef.current = [];
       setSelectedPoi(null);
       setCurrentStepIndex(0);
+      setCurrentStepRemaining(null);
       setHasActiveRoute(false);
       currentRouteRef.current = null;
       maxProgressIndexRef.current = 0;
@@ -282,6 +306,7 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
       maxProgressIndexRef.current = 0;
       setHasActiveRoute(true);
       setCurrentStepIndex(0);
+      setCurrentStepRemaining(null);
 
       const path = route.points.map(p => ({ lat: p[0], lng: p[1] }));
 
@@ -475,6 +500,8 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
           <NavigationStepsPanel
             steps={currentRouteRef.current.steps}
             currentStepIndex={currentStepIndex}
+            remainingDistanceMeters={currentStepRemaining?.distanceMeters}
+            remainingDurationSeconds={currentStepRemaining?.durationSeconds}
             onStepClick={setCurrentStepIndex}
           />
         )}

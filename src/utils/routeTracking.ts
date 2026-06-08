@@ -77,26 +77,114 @@ export function formatRemainingRouteSummary(
   return `${stats.remainingDistanceKm} км · ~${stats.remainingTimeMinutes} хв залишилось${diffStr}`;
 }
 
-/** Find index of closest point on route to user position */
+export interface RouteProgressPosition {
+  segmentIndex: number;
+  snappedPoint: [number, number];
+  distanceFromRouteKm: number;
+}
+
+function projectPointOntoSegment(
+  userLngLat: [number, number],
+  aLatLng: [number, number],
+  bLatLng: [number, number]
+): { distKm: number; t: number; point: [number, number] } {
+  const [uLng, uLat] = userLngLat;
+  const [aLat, aLng] = aLatLng;
+  const [bLat, bLng] = bLatLng;
+
+  const dx = bLng - aLng;
+  const dy = bLat - aLat;
+  const len2 = dx * dx + dy * dy;
+
+  if (len2 === 0) {
+    return {
+      distKm: getDistanceKm(userLngLat, [aLng, aLat]),
+      t: 0,
+      point: aLatLng,
+    };
+  }
+
+  const t = Math.max(0, Math.min(1, ((uLng - aLng) * dx + (uLat - aLat) * dy) / len2));
+  const pLat = aLat + t * dy;
+  const pLng = aLng + t * dx;
+
+  return {
+    distKm: getDistanceKm(userLngLat, [pLng, pLat]),
+    t,
+    point: [pLat, pLng],
+  };
+}
+
+/** Project user position onto route polyline, searching forward from minSegmentIndex */
+export function findRouteProgress(
+  routePoints: [number, number][],
+  userLngLat: [number, number],
+  minSegmentIndex = 0
+): RouteProgressPosition {
+  if (routePoints.length === 0) {
+    return { segmentIndex: 0, snappedPoint: [0, 0], distanceFromRouteKm: Infinity };
+  }
+  if (routePoints.length === 1) {
+    return {
+      segmentIndex: 0,
+      snappedPoint: routePoints[0],
+      distanceFromRouteKm: getDistanceKm(userLngLat, [routePoints[0][1], routePoints[0][0]]),
+    };
+  }
+
+  const searchStart = Math.max(0, minSegmentIndex);
+  const searchEnd = Math.min(routePoints.length - 2, searchStart + 200);
+
+  let bestDist = Infinity;
+  let bestSegmentIndex = searchStart;
+  let bestSnap: [number, number] = routePoints[searchStart];
+  let bestT = 0;
+
+  for (let i = searchStart; i <= searchEnd; i++) {
+    const proj = projectPointOntoSegment(userLngLat, routePoints[i], routePoints[i + 1]);
+    if (proj.distKm < bestDist) {
+      bestDist = proj.distKm;
+      bestSegmentIndex = i;
+      bestSnap = proj.point;
+      bestT = proj.t;
+    }
+  }
+
+  const segmentIndex =
+    bestT > 0.85
+      ? Math.min(bestSegmentIndex + 1, routePoints.length - 1)
+      : bestSegmentIndex;
+
+  return {
+    segmentIndex,
+    snappedPoint: bestSnap,
+    distanceFromRouteKm: bestDist,
+  };
+}
+
+/** Find index of closest vertex on route to user position */
 export function findClosestPointIndex(
   routePoints: [number, number][],
   userLngLat: [number, number]
 ): number {
-  if (routePoints.length === 0) return 0;
+  return findRouteProgress(routePoints, userLngLat, 0).segmentIndex;
+}
 
-  let minDist = Infinity;
-  let closestIdx = 0;
+export function getStepRemainingToEnd(
+  step: { distanceMeters: number; durationSeconds: number; endLocation: [number, number] },
+  userLngLat: [number, number]
+): { distanceMeters: number; durationSeconds: number } {
+  const distKm = getDistanceKm(userLngLat, [step.endLocation[1], step.endLocation[0]]);
+  const distanceMeters = Math.min(
+    step.distanceMeters,
+    Math.max(0, Math.round(distKm * 1000))
+  );
+  const durationSeconds =
+    step.distanceMeters > 0
+      ? Math.max(0, Math.round(step.durationSeconds * (distanceMeters / step.distanceMeters)))
+      : 0;
 
-  for (let i = 0; i < routePoints.length; i++) {
-    const pt = routePoints[i];
-    const dist = getDistanceKm(userLngLat, [pt[1], pt[0]]);
-    if (dist < minDist) {
-      minDist = dist;
-      closestIdx = i;
-    }
-  }
-
-  return closestIdx;
+  return { distanceMeters, durationSeconds };
 }
 
 /** Find current step index based on proximity to step end points and route progress */

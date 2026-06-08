@@ -4,6 +4,8 @@ import { RouteStep } from "../services/routeService";
 interface NavigationStepsPanelProps {
   steps: RouteStep[];
   currentStepIndex: number;
+  remainingDistanceMeters?: number;
+  remainingDurationSeconds?: number;
   onStepClick?: (index: number) => void;
 }
 
@@ -22,6 +24,8 @@ function formatDistance(meters: number): string {
 const NavigationStepsPanel: React.FC<NavigationStepsPanelProps> = ({
   steps,
   currentStepIndex,
+  remainingDistanceMeters,
+  remainingDurationSeconds,
   onStepClick,
 }) => {
   const [expanded, setExpanded] = useState(true);
@@ -31,6 +35,11 @@ const NavigationStepsPanel: React.FC<NavigationStepsPanelProps> = ({
   const current = steps[Math.min(currentStepIndex, steps.length - 1)];
   const next = steps[currentStepIndex + 1];
   const icon = current.maneuver ? (MANEUVER_ICON[current.maneuver] || '→') : '→';
+  const showRemaining = remainingDistanceMeters !== undefined;
+  const displayDistance = showRemaining ? remainingDistanceMeters! : current.distanceMeters;
+  const displayDuration = showRemaining
+    ? (remainingDurationSeconds ?? 0)
+    : current.durationSeconds;
 
   if (!expanded) {
     return (
@@ -74,8 +83,9 @@ const NavigationStepsPanel: React.FC<NavigationStepsPanelProps> = ({
           <div className="flex-grow-1 min-w-0">
             <div className="fw-bold text-dark small">{current.instruction}</div>
             <div className="text-muted" style={{ fontSize: '0.75rem' }}>
-              {formatDistance(current.distanceMeters)}
-              {current.durationSeconds > 0 && ` · ~${Math.max(1, Math.round(current.durationSeconds / 60))} хв`}
+              {showRemaining && <span className="text-success fw-semibold">залишилось </span>}
+              {formatDistance(displayDistance)}
+              {displayDuration > 0 && ` · ~${Math.max(1, Math.round(displayDuration / 60))} хв`}
             </div>
           </div>
         </div>
