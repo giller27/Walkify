@@ -4,7 +4,12 @@ import { generateRouteFromText, RouteResult, RouteWaypoint } from "../services/r
 import { reverseGeocode } from "../services/placesService";
 import type { SavedRoute } from "../services/supabaseService";
 import type { RouteDifficulty } from "../types/routeEnhancements";
-import { findClosestPointIndex, findCurrentStepIndex } from "../utils/routeTracking";
+import {
+  findClosestPointIndex,
+  findCurrentStepIndex,
+  calculateRemainingRouteStats,
+  formatRemainingRouteSummary,
+} from "../utils/routeTracking";
 import PlaceInfoCard from "./PlaceInfoCard";
 import NavigationStepsPanel from "./NavigationStepsPanel";
 
@@ -119,6 +124,7 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
     const [currentStepIndex, setCurrentStepIndex] = useState(0);
     const [hasActiveRoute, setHasActiveRoute] = useState(false);
     const currentRouteRef = useRef<RouteResult | null>(null);
+    const maxProgressIndexRef = useRef(0);
 
     const updateUserMarker = useCallback((lngLat: [number, number], heading?: number | null) => {
       const map = mapRef.current;
@@ -149,7 +155,10 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
       const route = currentRouteRef.current;
       if (!route?.points.length) return;
 
-      const idx = findClosestPointIndex(route.points, userLngLat);
+      const closestIdx = findClosestPointIndex(route.points, userLngLat);
+      const idx = Math.max(maxProgressIndexRef.current, closestIdx);
+      maxProgressIndexRef.current = idx;
+
       const toLatLng = (p: [number, number]) => ({ lat: p[0], lng: p[1] });
 
       const traveledPath = route.points.slice(0, idx + 1).map(toLatLng);
@@ -158,8 +167,9 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
       traveledLineRef.current?.setPath(traveledPath);
       remainingLineRef.current?.setPath(remainingPath);
 
+      let stepIdx: number | undefined;
       if (route.steps?.length) {
-        const stepIdx = findCurrentStepIndex(
+        stepIdx = findCurrentStepIndex(
           route.steps,
           [userLngLat[1], userLngLat[0]],
           idx,
@@ -167,7 +177,10 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
         );
         setCurrentStepIndex(stepIdx);
       }
-    }, []);
+
+      const stats = calculateRemainingRouteStats(route, idx, stepIdx);
+      onRouteSummary?.(formatRemainingRouteSummary(stats, route.difficulty));
+    }, [onRouteSummary]);
 
     const startLocationTracking = useCallback(() => {
       if (!navigator.geolocation) return;
@@ -245,6 +258,7 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
       setCurrentStepIndex(0);
       setHasActiveRoute(false);
       currentRouteRef.current = null;
+      maxProgressIndexRef.current = 0;
     }, [clearRouteLines]);
 
     const displayRoute = useCallback((route: RouteResult) => {
@@ -257,6 +271,7 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
       setSelectedPoi(null);
 
       currentRouteRef.current = route;
+      maxProgressIndexRef.current = 0;
       setHasActiveRoute(true);
       setCurrentStepIndex(0);
 
@@ -264,8 +279,8 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
 
       traveledLineRef.current = new google.maps.Polyline({
         path: path.length > 0 ? [path[0]] : [],
-        strokeColor: '#28a745',
-        strokeOpacity: 0.35,
+        strokeColor: '#9e9e9e',
+        strokeOpacity: 0.85,
         strokeWeight: 6,
         map,
         zIndex: 1,
@@ -311,8 +326,8 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
         updateRouteProgress(userLocationRef.current);
       }
 
-      const summary = `${route.distanceKm} км · ~${route.estimatedTimeMinutes} хв${route.difficulty ? ` · ${route.difficulty}` : ''}`;
-      onRouteSummary?.(summary);
+      const initialStats = calculateRemainingRouteStats(route, 0, 0);
+      onRouteSummary?.(formatRemainingRouteSummary(initialStats, route.difficulty));
     }, [clearRouteLines, onRouteSummary, updateRouteProgress]);
 
     const setDestinationMarker = useCallback((coords: [number, number]) => {

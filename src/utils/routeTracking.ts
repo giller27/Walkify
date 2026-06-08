@@ -1,4 +1,81 @@
-import { getDistanceKm } from '../services/waypointOptimizer';
+import { getDistanceKm, distanceToTimeMinutes } from '../services/waypointOptimizer';
+
+export interface RouteProgressStats {
+  remainingDistanceKm: number;
+  remainingTimeMinutes: number;
+}
+
+/** Cumulative path distance between point indices (inclusive start, exclusive end segment pairs) */
+export function calculatePathDistanceKm(
+  routePoints: [number, number][],
+  fromIdx: number,
+  toIdx: number
+): number {
+  if (routePoints.length < 2 || fromIdx >= toIdx) return 0;
+
+  const start = Math.max(0, fromIdx);
+  const end = Math.min(routePoints.length - 1, toIdx);
+  let total = 0;
+
+  for (let i = start; i < end; i++) {
+    const p1 = routePoints[i];
+    const p2 = routePoints[i + 1];
+    total += getDistanceKm([p1[1], p1[0]], [p2[1], p2[0]]);
+  }
+
+  return total;
+}
+
+/** Remaining distance/time from current progress along the route */
+export function calculateRemainingRouteStats(
+  route: {
+    points: [number, number][];
+    steps?: { distanceMeters: number; durationSeconds: number }[];
+    distanceKm: number;
+    estimatedTimeMinutes: number;
+  },
+  progressIndex: number,
+  stepIndex?: number
+): RouteProgressStats {
+  if (route.steps?.length && stepIndex !== undefined) {
+    let distanceMeters = 0;
+    let durationSeconds = 0;
+    for (let i = stepIndex; i < route.steps.length; i++) {
+      distanceMeters += route.steps[i].distanceMeters;
+      durationSeconds += route.steps[i].durationSeconds;
+    }
+    return {
+      remainingDistanceKm: parseFloat((distanceMeters / 1000).toFixed(2)),
+      remainingTimeMinutes: Math.max(0, Math.round(durationSeconds / 60)),
+    };
+  }
+
+  const remainingDistanceKm = calculatePathDistanceKm(
+    route.points,
+    progressIndex,
+    route.points.length - 1
+  );
+  const remainingTimeMinutes =
+    route.distanceKm > 0
+      ? Math.max(0, Math.round(route.estimatedTimeMinutes * (remainingDistanceKm / route.distanceKm)))
+      : distanceToTimeMinutes(remainingDistanceKm);
+
+  return {
+    remainingDistanceKm: parseFloat(remainingDistanceKm.toFixed(2)),
+    remainingTimeMinutes,
+  };
+}
+
+export function formatRemainingRouteSummary(
+  stats: RouteProgressStats,
+  difficulty?: string
+): string {
+  const diffStr = difficulty ? ` · ${difficulty}` : '';
+  if (stats.remainingDistanceKm < 0.05) {
+    return `Майже на місці${diffStr}`;
+  }
+  return `${stats.remainingDistanceKm} км · ~${stats.remainingTimeMinutes} хв залишилось${diffStr}`;
+}
 
 /** Find index of closest point on route to user position */
 export function findClosestPointIndex(

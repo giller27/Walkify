@@ -79,11 +79,6 @@ const Home: React.FC = () => {
 
         const generatedRoute = await generateRouteByFilters(userLoc, options);
         loadRouteOnMap(generatedRoute);
-
-        const diffStr = generatedRoute.difficulty ? ` · ${generatedRoute.difficulty}` : '';
-        setRouteSummary(
-          `${generatedRoute.distanceKm} км · ~${generatedRoute.estimatedTimeMinutes} хв (ціль: ${filterOptions.targetTimeMinutes} хв)${diffStr}`
-        );
       } catch (err: any) {
         alert(err.message || "Помилка побудови маршруту.");
         setRouteSummary("");
@@ -106,11 +101,6 @@ const Home: React.FC = () => {
           routeMode: prefs.routeMode as "exploration" | "point_to_point" | undefined,
         });
         loadRouteOnMap(generatedRoute);
-
-        const diffStr = generatedRoute.difficulty ? ` · ${generatedRoute.difficulty}` : '';
-        setRouteSummary(
-          `${generatedRoute.distanceKm} км · ~${generatedRoute.estimatedTimeMinutes} хв${diffStr}`
-        );
       } catch (err: any) {
         alert(err.message || "Помилка побудови маршруту.");
         setRouteSummary("");
