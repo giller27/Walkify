@@ -1,5 +1,32 @@
-import type { RouteResult } from '../services/routeService';
+import type { RouteResult, PoiCategory } from '../services/routeService';
 import type { SavedRoute } from '../services/supabaseService';
+import type { RouteDifficulty } from '../types/routeEnhancements';
+
+type SavedWaypointType = NonNullable<SavedRoute['waypoints']>[number]['type'];
+
+const SAVED_WAYPOINT_TYPES = new Set<SavedWaypointType>([
+  'cafe', 'park', 'shop', 'restaurant', 'museum', 'library',
+  'place_of_worship', 'beach', 'lake', 'river', 'custom',
+]);
+
+function toSavedWaypointType(type: PoiCategory): SavedWaypointType {
+  return SAVED_WAYPOINT_TYPES.has(type as SavedWaypointType)
+    ? (type as SavedWaypointType)
+    : 'custom';
+}
+
+function toSavedDifficulty(difficulty?: RouteDifficulty): SavedRoute['difficulty'] {
+  switch (difficulty) {
+    case 'Easy':
+      return 'easy';
+    case 'Moderate':
+      return 'moderate';
+    case 'Challenging':
+      return 'hard';
+    default:
+      return undefined;
+  }
+}
 
 export function buildSavedRouteFromResult(
   route: RouteResult,
@@ -13,7 +40,7 @@ export function buildSavedRouteFromResult(
     waypoints: route.waypoints.map((wp) => ({
       location: wp.location,
       name: wp.name,
-      type: wp.type,
+      type: toSavedWaypointType(wp.type),
       address: wp.address,
       rating: wp.rating,
       userRatingsTotal: wp.userRatingsTotal,
@@ -28,7 +55,7 @@ export function buildSavedRouteFromResult(
       locations: route.locations,
       ...(route.steps ? { steps: route.steps } : {}),
     } as SavedRoute['preferences'],
-    difficulty: route.difficulty,
+    difficulty: toSavedDifficulty(route.difficulty),
     is_public: false,
   };
 }
