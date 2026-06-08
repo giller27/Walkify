@@ -1,3 +1,5 @@
+/// <reference types="google.maps" />
+
 import { selectBestWaypoints, sequenceWaypoints } from './waypointOptimizer';
 import { calculateElevationProfile, getTerrainInfo, calculateRouteDifficulty } from './routeOptions';
 import type { RouteDifficulty, ElevationProfile } from '../types/routeEnhancements';
@@ -73,7 +75,6 @@ function getPlacesService(): google.maps.places.PlacesService {
   if (!window.google || !window.google.maps || !window.google.maps.places) {
     throw new Error("Google Maps Places API is not loaded.");
   }
-  // PlacesService requires an HTML element, we can use a dummy div
   return new google.maps.places.PlacesService(document.createElement('div'));
 }
 
@@ -86,8 +87,9 @@ export async function findPlaceByName(placeName: string, userLocation: [number, 
       radius: 50000, // 50km
     };
 
-    service.textSearch(request, (results, status) => {
-      if (status === google.maps.places.PlacesServiceStatus.OK && results && results.length > 0) {
+    // FIXED: Using 'any' for status to bypass strict enum/string union mismatch
+    service.textSearch(request, (results: google.maps.places.PlaceResult[] | null, status: any) => {
+      if (status === 'OK' && results && results.length > 0) {
         const place = results[0];
         resolve({
           name: place.name || placeName,
@@ -115,9 +117,10 @@ async function findPlacesByGoogleType(center: [number, number], type: string, ra
       type: type,
     };
 
-    service.nearbySearch(request, (results, status) => {
-      if (status === google.maps.places.PlacesServiceStatus.OK && results) {
-        const places: Place[] = results.map(p => ({
+    // FIXED: Using 'any' for status to bypass strict enum/string union mismatch
+    service.nearbySearch(request, (results: google.maps.places.PlaceResult[] | null, status: any) => {
+      if (status === 'OK' && results) {
+        const places: Place[] = results.map((p: google.maps.places.PlaceResult) => ({
           name: p.name || 'Unknown',
           coordinates: [p.geometry!.location!.lng(), p.geometry!.location!.lat()],
           type: type,
@@ -145,13 +148,11 @@ export async function searchComprehensivePois(
   const allResults: Place[] = [];
   const searchTypes = desiredTypes.length > 0 ? desiredTypes : EXTENDED_POI_TYPES;
   
-  // Fetch from Google Places for each type
   for (const type of searchTypes) {
     const places = await findPlacesByGoogleType(center, type, radius);
     allResults.push(...places);
   }
 
-  // Deduplicate by Place ID or rough coordinates/name
   const uniquePlaces = new Map<string, Place>();
   for (const place of allResults) {
     const key = place.externalId || `${place.name}_${place.coordinates[0].toFixed(3)}`;
@@ -168,14 +169,12 @@ function filterPoisByDiversity(pois: Place[]): Place[] {
   const categoryCounts: Record<string, number> = {};
   const diversePois: Place[] = [];
 
-  // Sort by rating first to ensure we pick the best of each category
   const sortedPois = pois.sort((a, b) => (b.rating || 0) - (a.rating || 0));
 
   for (const poi of sortedPois) {
     const cat = poi.type || 'custom';
     if (!categoryCounts[cat]) categoryCounts[cat] = 0;
     
-    // Cap at 2 per category to force diversity
     if (categoryCounts[cat] < 2) {
       diversePois.push(poi);
       categoryCounts[cat]++;
@@ -207,24 +206,23 @@ export async function buildRoute(
         stopover: true
       })),
       travelMode: google.maps.TravelMode.WALKING,
-      // We set optimizeWaypoints to false because we already optimized them via our 2-opt algorithm!
       optimizeWaypoints: false, 
     };
 
-    directionsService.route(request, async (result, status) => {
-      if (status === google.maps.DirectionsStatus.OK && result) {
+    // FIXED: Using 'any' for status to bypass strict enum/string union mismatch
+    directionsService.route(request, async (result: google.maps.DirectionsResult | null, status: any) => {
+      if (status === 'OK' && result) {
         const route = result.routes[0];
-        const leg = route.legs[0]; // For simplicity, aggregate legs if multiple
         
         let totalDistanceMeters = 0;
         let totalDurationSeconds = 0;
         const points: [number, number][] = [];
 
-        route.legs.forEach(l => {
+        route.legs.forEach((l: google.maps.DirectionsLeg) => {
           totalDistanceMeters += l.distance?.value || 0;
           totalDurationSeconds += l.duration?.value || 0;
-          l.steps.forEach(step => {
-            step.path.forEach(latLng => {
+          l.steps.forEach((step: google.maps.DirectionsStep) => {
+            step.path.forEach((latLng: google.maps.LatLng) => {
               points.push([latLng.lat(), latLng.lng()]);
             });
           });
@@ -233,9 +231,8 @@ export async function buildRoute(
         const distanceKm = parseFloat((totalDistanceMeters / 1000).toFixed(2));
         const estimatedTimeMinutes = Math.round(totalDurationSeconds / 60);
 
-        // Fetch Advanced Options (Elevation & Difficulty)
         const elevationProfile = await calculateElevationProfile(points);
-        const difficulty = calculateRouteDifficulty(distanceKm, elevationProfile, 1.0); // Default terrain mult
+        const difficulty = calculateRouteDifficulty(distanceKm, elevationProfile, 1.0);
 
         const waypointsWithNames = waypoints.map((wp, index) => ({
           location: [wp[1], wp[0]] as [number, number],
@@ -271,26 +268,21 @@ export async function generateExplorationRoute(
 ): Promise<RouteResult> {
   const { types, desiredPoiCount = 6 } = options;
 
-  // 1. Search comprehensive & diverse POIs
   const nearbyPois = await searchComprehensivePois(userLocation, types, 3000);
 
   if (nearbyPois.length === 0) {
     throw new Error('Поруч не вдалося знайти цікаві місця для прогулянки. Спробуйте інший район.');
   }
 
-  // 2. Select best waypoints using Tier 1 Scoring
-  const destinationPoi = nearbyPois[nearbyPois.length - 1]; // Pick a rough destination
+  const destinationPoi = nearbyPois[nearbyPois.length - 1]; 
   const selectedPois = selectBestWaypoints(nearbyPois, desiredPoiCount, userLocation, destinationPoi.coordinates);
 
-  // 3. Sequence waypoints using Tier 2 (2-opt Algorithm) to prevent zigzagging
-  const sequencedPois = sequenceWaypoints(selectedPois, userLocation, userLocation); // Circular loop
+  const sequencedPois = sequenceWaypoints(selectedPois, userLocation, userLocation); 
 
   const waypointCoords: [number, number][] = sequencedPois.map(p => p.coordinates);
 
-  // 4. Build Route
-  const route = await buildRoute(userLocation, userLocation, waypointCoords); // Loop back to start
+  const route = await buildRoute(userLocation, userLocation, waypointCoords); 
 
-  // Map POIs to Waypoints and inject Terrain Data
   route.waypoints = sequencedPois.map(wp => {
     const terrain = getTerrainInfo(wp.type);
     return {
@@ -339,7 +331,6 @@ export async function generateRouteFromText(
     throw new Error('Не вдалося визначити пункт призначення. Спробуйте уточнити запит.');
   }
 
-  // Find Waypoints
   let waypointPlaces: Place[] = [];
   for (const wName of parsed.waypointNames) {
     const wp = await findPlaceByName(wName, userLocation);
@@ -351,7 +342,6 @@ export async function generateRouteFromText(
     waypointPlaces = [...waypointPlaces, ...selectBestWaypoints(extraPois, 2, userLocation, destination.coordinates)];
   }
 
-  // Sequence to prevent weird overlaps
   const sequencedWaypoints = sequenceWaypoints(waypointPlaces, userLocation, destination.coordinates);
   const wayCoords: [number, number][] = sequencedWaypoints.map(w => w.coordinates);
 
@@ -366,8 +356,6 @@ export async function generateRouteFromText(
 
   return route;
 }
-
-// ─── Text Parsing Logic ─────────────────────────────────────────────────────────
 
 export function parseRouteRequest(text: string): {
   destinationType: string | null;
