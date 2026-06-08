@@ -1,234 +1,136 @@
-import { useRef, useState, useEffect } from "react";
-import RouteMap, { RouteMapRef, WalkPreferences } from "../Components/RouteMap";
-import WalkPreferencesBar from "../Components/WalkPreferences";
-import { addWalkStatistic } from "../services/supabaseService";
-import { useAuth } from "../context/AuthContext";
+import React, { useState, useRef } from "react";
+import RouteMap, { RouteMapRef } from "../Components/RouteMap";
+import WalkPreferences from "../Components/WalkPreferences"; // Імпортуйте саме так
+import WalkFiltersMenu from "../Components/WalkFiltersMenu";
+import { generateRouteByFilters, RouteFilterOptions } from "../services/routeService";
 
-interface GoogleUser {
-  name: string;
-  picture: string;
-  email: string;
-}
+const Home: React.FC = () => {
+  const mapRef = useRef<RouteMapRef>(null);
+  const [activeTab, setActiveTab] = useState<"filters" | "text">("filters");
+  const [isGenerating, setIsGenerating] = useState<boolean>(false);
+  const [routeSummary, setRouteSummary] = useState<string>("");
 
-function Home() {
-  const { user } = useAuth();
-  const routeMapRef = useRef<RouteMapRef>(null);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [routeSummary, setRouteSummary] = useState("");
-  const [loadedRoute, setLoadedRoute] = useState<WalkPreferences | null>(null);
-  const [userInfo, setUserInfo] = useState<GoogleUser | null>(null);
-  const [isPanelExpanded, setIsPanelExpanded] = useState(true); // Стан панелі
-  const [hasRoute, setHasRoute] = useState(false); // Стан наявності маршруту
-
-  // Завантажити інформацію користувача
-  useEffect(() => {
-    const storedUser = localStorage.getItem("userInfo");
-    if (storedUser) {
-      try {
-        const user = JSON.parse(storedUser);
-        setUserInfo(user);
-      } catch (e) {
-        console.error("Помилка завантаження інформації користувача:", e);
-      }
-    }
-  }, []);
-
-  // Завантажити маршрут з localStorage, якщо він є
-  useEffect(() => {
-    const routeToLoad = localStorage.getItem("routeToLoad");
-    if (routeToLoad) {
-      try {
-        const preferences = JSON.parse(routeToLoad);
-        setLoadedRoute(preferences);
-        localStorage.removeItem("routeToLoad"); // Видалити після завантаження
-      } catch (e) {
-        console.error("Помилка завантаження маршруту:", e);
-      }
-    }
-
-    // Альтернативно, перевірити routeToView для уже збережених маршрутів
-    const routeToView = localStorage.getItem("routeToView");
-    if (routeToView) {
-      try {
-        const savedRoute = JSON.parse(routeToView);
-        // Передати маршрут з точками до RouteMap для візуалізації
-        localStorage.setItem("viewSavedRoute", JSON.stringify(savedRoute));
-        localStorage.removeItem("routeToView");
-      } catch (e) {
-        console.error("Помилка завантаження маршруту для перегляду:", e);
-      }
-    }
-  }, []);
-
-  // Update isGenerating state periodically
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (routeMapRef.current) {
-        setIsGenerating(routeMapRef.current.isGenerating);
-      }
-    }, 100);
-    return () => clearInterval(interval);
-  }, []);
-
-  const handleGenerate = async (preferences: WalkPreferences) => {
-    if (routeMapRef.current) {
-      setIsGenerating(true);
-      await routeMapRef.current.generateRoute(preferences);
-      setIsGenerating(false);
-    }
-  };
-
-  const handleRequestGeolocation = () => {
-    if (routeMapRef.current) {
-      routeMapRef.current.requestGeolocation();
-    }
-  };
-
-  const handleSaveRoute = async () => {
-    if (!routeMapRef.current || !user) {
-      alert("Будь ласка, авторизуйтеся");
-      return;
-    }
-
+  // Обробник для генерації суто за фільтрами
+  const handleFilterGeneration = async (filterOptions: RouteFilterOptions) => {
+    if (!mapRef.current) return;
+    
+    setIsGenerating(true);
+    setRouteSummary("Пошук оптимальних локацій у Google Places...");
+    
     try {
-      const currentRoute = routeMapRef.current.getCurrentRoute();
-      if (!currentRoute || currentRoute.points.length === 0) {
-        alert("Немає маршруту для збереження");
-        return;
-      }
-
-      const routeName = prompt("Введіть назву маршруту:", "Мій маршрут");
-      if (!routeName) return;
-
-      // Подготовуємо дані для збереження
-      const saveData: any = {
-        user_id: user.id,
-        name: routeName,
-        description:
-          currentRoute.locations.join(", ") || "Згенерований маршрут",
-        points: currentRoute.points,
-        waypoints: currentRoute.waypoints,
-        statistics: {
-          distanceKm: currentRoute.distanceKm,
-          estimatedTimeMinutes: currentRoute.estimatedTimeMinutes,
-        },
-        preferences: {
-          locations: currentRoute.locations,
-        },
-      };
-
-      // Викликаємо функцію збереження з supabaseService
-      const { saveRoute } = await import("../services/supabaseService");
-      await saveRoute(saveData);
-
-      alert("Маршрут успішно збережено!");
-    } catch (error) {
-      console.error("Помилка при збереженні маршруту:", error);
-      alert(
-        "Помилка при збереженні: " +
-          (error instanceof Error ? error.message : String(error))
-      );
-    }
-  };
-
-  const handleClearRoute = () => {
-    if (routeMapRef.current) {
-      routeMapRef.current.clearCurrentRoute();
-      setHasRoute(false); // Позначити, що маршруту немає
-      setRouteSummary(""); // Очистити зведення маршруту
-    }
-  };
-
-  const handleRouteGenerated = async (data: {
-    distanceKm: number;
-    locations: string[];
-    prompt?: string;
-    estimatedTimeMinutes: number;
-  }) => {
-    setHasRoute(true); // Позначити, що маршрут є
-    // Зберегти статистику в Supabase, якщо користувач авторизований
-    if (user) {
-      try {
-        const todayDate = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
-        await addWalkStatistic({
-          user_id: user.id,
-          date: todayDate,
-          distance_km: data.distanceKm,
-          duration_minutes: Math.round(data.estimatedTimeMinutes), // Округлити до INTEGER
-          pace:
-            data.estimatedTimeMinutes > 0
-              ? data.distanceKm / (data.estimatedTimeMinutes / 60)
-              : 0,
-          notes: data.prompt || undefined,
-        } as any);
-        console.log("Статистика успішно додана");
-      } catch (err) {
-        console.error("Помилка збереження статистики:", err);
-      }
-    }
-  };
-
-  // Автоматично згенерувати маршрут, якщо він завантажений
-  useEffect(() => {
-    if (loadedRoute && routeMapRef.current) {
-      // Невелика затримка, щоб карта встигла ініціалізуватися
-      const timer = setTimeout(async () => {
-        if (routeMapRef.current) {
-          setIsGenerating(true);
-          await routeMapRef.current.generateRoute(loadedRoute);
+      // Отримуємо поточну позицію через API браузера:
+      navigator.geolocation.getCurrentPosition(async (position) => {
+        const userLoc: [number, number] = [position.coords.longitude, position.coords.latitude];
+        
+        try {
+          const generatedRoute = await generateRouteByFilters(userLoc, filterOptions);
+          
+          // Рендеримо готовий маршрут на мапі через існуючий метод loadSavedRoute
+          if (mapRef.current) {
+            (mapRef.current as any).loadSavedRoute({
+              points: generatedRoute.points,
+              statistics: {
+                distanceKm: generatedRoute.distanceKm,
+                estimatedTimeMinutes: generatedRoute.estimatedTimeMinutes
+              },
+              waypoints: generatedRoute.waypoints,
+              locations: generatedRoute.locations,
+              difficulty: generatedRoute.difficulty
+            });
+            
+            const diffStr = generatedRoute.difficulty ? ` · ${generatedRoute.difficulty}` : '';
+            setRouteSummary(`${generatedRoute.distanceKm} км · ~${generatedRoute.estimatedTimeMinutes} хв${diffStr}`);
+          }
+        } catch (err: any) {
+          alert(err.message || "Помилка побудови геометрії шляху.");
+          setRouteSummary("");
+        } finally {
           setIsGenerating(false);
         }
-      }, 500);
-      return () => clearTimeout(timer);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadedRoute]);
+      }, () => {
+        alert("Будь ласка, увімкніть геолокацію в браузері.");
+        setIsGenerating(false);
+        setRouteSummary("");
+      });
 
-  // Завантажити збережений маршрут для перегляду
-  useEffect(() => {
-    const viewSavedRoute = localStorage.getItem("viewSavedRoute");
-    if (viewSavedRoute && routeMapRef.current) {
-      try {
-        const routeData = JSON.parse(viewSavedRoute);
-        const timer = setTimeout(async () => {
-          if (routeMapRef.current) {
-            setIsGenerating(true);
-            await routeMapRef.current.loadSavedRoute(routeData);
-            setIsGenerating(false);
-            localStorage.removeItem("viewSavedRoute");
-          }
-        }, 500);
-        return () => clearTimeout(timer);
-      } catch (e) {
-        console.error("Помилка завантаження збереженого маршруту:", e);
-        localStorage.removeItem("viewSavedRoute");
-      }
+    } catch (error) {
+      console.error(error);
+      setIsGenerating(false);
+      setRouteSummary("");
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  };
 
   return (
-    <>
-      <RouteMap
-        ref={routeMapRef}
-        onRouteSummary={setRouteSummary}
-        onRouteGenerated={handleRouteGenerated}
-        panelExpanded={isPanelExpanded}
-      />
-      <WalkPreferencesBar
-        onGenerate={handleGenerate}
-        isGenerating={isGenerating}
-        routeSummary={routeSummary}
-        onRequestGeolocation={handleRequestGeolocation}
-        initialPreferences={loadedRoute || undefined}
-        isExpanded={isPanelExpanded}
-        onToggleExpand={() => setIsPanelExpanded(!isPanelExpanded)}
-        onSaveRoute={handleSaveRoute}
-        onClearRoute={handleClearRoute}
-        hasRoute={hasRoute}
-      />
-    </>
+    <div className="container-fluid p-0 position-relative" style={{ height: "calc(100vh - 120px)" }}>
+      <div className="row g-0 h-100">
+        
+        {/* Бічна панель управління */}
+        <div className="col-12 col-md-4 p-3 bg-light border-end overflow-y-auto" style={{ zIndex: 10, maxHeight: "100%" }}>
+          
+          {/* Перемикач режимів введення */}
+          <ul className="nav nav-pills nav-fill mb-3 bg-white p-1 rounded-3 border">
+            <li className="nav-item">
+              <button 
+                className={`nav-link rounded-2 fw-semibold py-2 ${activeTab === "filters" ? "active bg-success text-white" : "text-secondary"}`}
+                onClick={() => setActiveTab("filters")}
+              >
+                <i className="bi bi-sliders me-1"></i> Фільтри
+              </button>
+            </li>
+            <li className="nav-item">
+              <button 
+                className={`nav-link rounded-2 fw-semibold py-2 ${activeTab === "text" ? "active bg-success text-white" : "text-secondary"}`}
+                onClick={() => setActiveTab("text")}
+              >
+                <i className="bi bi-chat-left-text me-1"></i> Текстовий запит
+              </button>
+            </li>
+          </ul>
+
+          {/* Відображення відповідного інтерфейсу */}
+          {activeTab === "filters" ? (
+            <WalkFiltersMenu onGenerate={handleFilterGeneration} isGenerating={isGenerating} />
+          ) : (
+            <WalkPreferences
+  onGenerate={(prefs: any) => {
+    if (mapRef.current) {
+      mapRef.current.generateRoute(prefs);
+    }
+  }}
+  isGenerating={isGenerating}
+  // Додаємо обов'язкові пропси, яких не вистачало:
+  onRequestGeolocation={() => {
+    if (mapRef.current) {
+      mapRef.current.requestGeolocation();
+    }
+  }}
+  // Додаємо необов'язкові пропси, щоб уникнути інших помилок:
+  routeSummary={routeSummary}
+  hasRoute={!!mapRef.current?.getCurrentRoute()} // Перевірка чи є маршрут
+  onSaveRoute={() => console.log("Save clicked")} // Можна додати свою логіку
+  onClearRoute={() => mapRef.current?.clearCurrentRoute()}
+/>
+          )}
+
+          {routeSummary && (
+            <div className="alert alert-info mt-3 border-0 rounded-3 small shadow-sm">
+              <i className="bi bi-info-circle me-2"></i> {routeSummary}
+            </div>
+          )}
+        </div>
+
+        {/* Карта займає залишок екрану */}
+        <div className="col-12 col-md-8 position-relative h-100">
+          <RouteMap 
+            ref={mapRef} 
+            panelExpanded={true} 
+            onRouteSummary={(sum) => setRouteSummary(sum)}
+          />
+        </div>
+
+      </div>
+    </div>
   );
-}
+};
 
 export default Home;

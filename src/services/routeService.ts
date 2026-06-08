@@ -8,7 +8,7 @@ import type { RouteDifficulty, ElevationProfile } from '../types/routeEnhancemen
 
 export interface Place {
   name: string;
-  coordinates: [number, number]; // [lng, lat] for legacy compatibility
+  coordinates: [number, number]; // [lng, lat]
   type: string;
   address?: string;
   rating?: number;
@@ -21,7 +21,7 @@ export interface Place {
 
 export type PoiCategory =
   | 'cafe' | 'park' | 'shop' | 'restaurant' | 'museum'
-  | 'library' | 'place_of_worship' | 'beach' | 'lake' | 'river' | 'custom';
+  | 'library' | 'place_of_worship' | 'beach' | 'lake' | 'river' | 'custom' | 'tourist_attraction';
 
 export interface RouteWaypoint {
   location: [number, number]; // [lat, lng]
@@ -41,10 +41,17 @@ export interface RouteResult {
   distanceKm: number;
   estimatedTimeMinutes: number;
   locations: string[];
-  // New Enhancements
   difficulty?: RouteDifficulty;
   elevation?: ElevationProfile;
   terrainTypes?: string[];
+}
+
+export interface RouteFilterOptions {
+  routeMode: "exploration" | "point_to_point";
+  categories: string[];
+  desiredPoiCount: number;
+  targetDistanceKm: number;
+  minRating: number;
 }
 
 const EXTENDED_POI_TYPES = [
@@ -68,9 +75,6 @@ const PLACE_TYPE_MAPPING: Record<string, string> = {
 
 // ─── Google Maps API Wrappers ───────────────────────────────────────────────────
 
-/**
- * Ensures Google Places service is available and returns an instance
- */
 function getPlacesService(): google.maps.places.PlacesService {
   if (!window.google || !window.google.maps || !window.google.maps.places) {
     throw new Error("Google Maps Places API is not loaded.");
@@ -84,10 +88,9 @@ export async function findPlaceByName(placeName: string, userLocation: [number, 
     const request: google.maps.places.TextSearchRequest = {
       query: placeName,
       location: new google.maps.LatLng(userLocation[1], userLocation[0]),
-      radius: 50000, // 50km
+      radius: 50000,
     };
 
-    // FIXED: Using 'any' for status to bypass strict enum/string union mismatch
     service.textSearch(request, (results: google.maps.places.PlaceResult[] | null, status: any) => {
       if (status === 'OK' && results && results.length > 0) {
         const place = results[0];
@@ -117,7 +120,6 @@ async function findPlacesByGoogleType(center: [number, number], type: string, ra
       type: type,
     };
 
-    // FIXED: Using 'any' for status to bypass strict enum/string union mismatch
     service.nearbySearch(request, (results: google.maps.places.PlaceResult[] | null, status: any) => {
       if (status === 'OK' && results) {
         const places: Place[] = results.map((p: google.maps.places.PlaceResult) => ({
@@ -138,7 +140,71 @@ async function findPlacesByGoogleType(center: [number, number], type: string, ra
   });
 }
 
-// ─── Enhanced POI Discovery & Filtering ─────────────────────────────────────────
+// ─── Новий метод: Генерація за фільтрами ────────────────────────────────────────
+
+export async function generateRouteByFilters(
+  userLocation: [number, number],
+  options: RouteFilterOptions
+): Promise<RouteResult> {
+  const { categories, desiredPoiCount, routeMode, minRating } = options;
+
+  const searchCategories = categories.length > 0 ? categories : ['park', 'cafe', 'tourist_attraction'];
+  const allResults: Place[] = [];
+  const searchRadius = Math.max(2000, options.targetDistanceKm * 600); 
+
+  for (const cat of searchCategories) {
+    const places = await findPlacesByGoogleType(userLocation, cat, searchRadius);
+    allResults.push(...places);
+  }
+
+  const uniquePlaces = new Map<string, Place>();
+  for (const place of allResults) {
+    const key = place.externalId || `${place.name}_${place.coordinates[0].toFixed(3)}`;
+    if (!uniquePlaces.has(key) && (place.rating || 0) >= minRating) {
+      uniquePlaces.set(key, place);
+    }
+  }
+
+  const filteredPois = Array.from(uniquePlaces.values());
+
+  if (filteredPois.length === 0) {
+    throw new Error(`Не знайдено місць із рейтингом від ${minRating}★ у радіусі ${searchRadius}м. Спробуйте обрати інші категорії.`);
+  }
+
+  const potentialDestination = filteredPois[filteredPois.length - 1];
+  const targetEndCoord = routeMode === 'exploration' ? userLocation : potentialDestination.coordinates;
+
+  const selectedPois = selectBestWaypoints(
+    filteredPois, 
+    Math.min(desiredPoiCount, filteredPois.length), 
+    userLocation, 
+    targetEndCoord
+  );
+
+  const sequencedPois = sequenceWaypoints(selectedPois, userLocation, targetEndCoord);
+  const waypointCoords: [number, number][] = sequencedPois.map(p => p.coordinates);
+
+  const route = await buildRoute(userLocation, targetEndCoord, waypointCoords);
+
+  route.waypoints = sequencedPois.map(wp => {
+    const terrain = getTerrainInfo(wp.type);
+    return {
+      location: [wp.coordinates[1], wp.coordinates[0]] as [number, number],
+      name: wp.name,
+      type: wp.type as PoiCategory,
+      address: wp.address,
+      rating: wp.rating,
+      userRatingsTotal: wp.userRatingsTotal,
+      description: `Покриття: ${terrain.surfaceType} | Мальовничість: ${terrain.scenicScore}`,
+      source: 'google'
+    };
+  });
+
+  route.locations = sequencedPois.map(wp => wp.name);
+  return route;
+}
+
+// ─── Enhanced POI Discovery & Filtering (Text Mode) ───────────────────────────
 
 export async function searchComprehensivePois(
   center: [number, number], 
@@ -168,7 +234,6 @@ export async function searchComprehensivePois(
 function filterPoisByDiversity(pois: Place[]): Place[] {
   const categoryCounts: Record<string, number> = {};
   const diversePois: Place[] = [];
-
   const sortedPois = pois.sort((a, b) => (b.rating || 0) - (a.rating || 0));
 
   for (const poi of sortedPois) {
@@ -180,7 +245,6 @@ function filterPoisByDiversity(pois: Place[]): Place[] {
       categoryCounts[cat]++;
     }
   }
-
   return diversePois;
 }
 
@@ -209,7 +273,6 @@ export async function buildRoute(
       optimizeWaypoints: false, 
     };
 
-    // FIXED: Using 'any' for status to bypass strict enum/string union mismatch
     directionsService.route(request, async (result: google.maps.DirectionsResult | null, status: any) => {
       if (status === 'OK' && result) {
         const route = result.routes[0];
@@ -256,7 +319,7 @@ export async function buildRoute(
   });
 }
 
-// ─── Route Generation Orchestrators ─────────────────────────────────────────────
+// ─── Route Generation Orchestrators (Text Mode) ─────────────────────────────────
 
 export async function generateExplorationRoute(
   userLocation: [number, number], 
@@ -267,7 +330,6 @@ export async function generateExplorationRoute(
   }
 ): Promise<RouteResult> {
   const { types, desiredPoiCount = 6 } = options;
-
   const nearbyPois = await searchComprehensivePois(userLocation, types, 3000);
 
   if (nearbyPois.length === 0) {
@@ -276,9 +338,7 @@ export async function generateExplorationRoute(
 
   const destinationPoi = nearbyPois[nearbyPois.length - 1]; 
   const selectedPois = selectBestWaypoints(nearbyPois, desiredPoiCount, userLocation, destinationPoi.coordinates);
-
   const sequencedPois = sequenceWaypoints(selectedPois, userLocation, userLocation); 
-
   const waypointCoords: [number, number][] = sequencedPois.map(p => p.coordinates);
 
   const route = await buildRoute(userLocation, userLocation, waypointCoords); 
@@ -292,7 +352,7 @@ export async function generateExplorationRoute(
       address: wp.address,
       rating: wp.rating,
       userRatingsTotal: wp.userRatingsTotal,
-      description: `Surface: ${terrain.surfaceType} | Scenic Score: ${terrain.scenicScore}`,
+      description: `Покриття: ${terrain.surfaceType} | Мальовничість: ${terrain.scenicScore}`,
       source: 'google'
     };
   });
