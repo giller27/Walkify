@@ -1,41 +1,25 @@
-// Сервіс для пошуку місць та побудови маршрутів
+import { selectBestWaypoints, sequenceWaypoints } from './waypointOptimizer';
+import { calculateElevationProfile, getTerrainInfo, calculateRouteDifficulty } from './routeOptions';
+import type { RouteDifficulty, ElevationProfile } from '../types/routeEnhancements';
 
-import { loadGoogleMaps } from "./googleMapsLoader";
-import type { RouteOptions } from "../types/routeEnhancements";
+// ─── Interfaces & Types ─────────────────────────────────────────────────────────
 
 export interface Place {
   name: string;
-  coordinates: [number, number]; // [lng, lat]
+  coordinates: [number, number]; // [lng, lat] for legacy compatibility
   type: string;
   address?: string;
   rating?: number;
   userRatingsTotal?: number;
   photoUrl?: string;
   description?: string;
-  source?: PoiSource;
+  source?: 'google' | 'custom';
   externalId?: string;
 }
 
-export interface RoutePoint {
-  coordinates: [number, number]; // [lng, lat]
-  type: 'start' | 'waypoint' | 'end';
-  name?: string;
-}
-
-export type PoiSource = 'google' | 'mapbox' | 'osm' | 'google_like' | 'custom';
-
 export type PoiCategory =
-  | 'cafe'
-  | 'park'
-  | 'shop'
-  | 'restaurant'
-  | 'museum'
-  | 'library'
-  | 'place_of_worship'
-  | 'beach'
-  | 'lake'
-  | 'river'
-  | 'custom';
+  | 'cafe' | 'park' | 'shop' | 'restaurant' | 'museum'
+  | 'library' | 'place_of_worship' | 'beach' | 'lake' | 'river' | 'custom';
 
 export interface RouteWaypoint {
   location: [number, number]; // [lat, lng]
@@ -46,83 +30,74 @@ export interface RouteWaypoint {
   userRatingsTotal?: number;
   photoUrl?: string;
   description?: string;
-  source?: PoiSource;
+  source?: 'google' | 'custom';
 }
 
 export interface RouteResult {
-  points: [number, number][]; // [lat, lng] для сумісності з існуючим кодом
+  points: [number, number][]; // [lat, lng]
   waypoints: RouteWaypoint[];
   distanceKm: number;
   estimatedTimeMinutes: number;
   locations: string[];
-  options?: RouteOptions;
+  // New Enhancements
+  difficulty?: RouteDifficulty;
+  elevation?: ElevationProfile;
+  terrainTypes?: string[];
 }
 
-interface ParsedPrompt {
-  poiKeywords: string[];
-  isExploration: boolean;
-}
+const EXTENDED_POI_TYPES = [
+  'cafe', 'park', 'restaurant', 'store', 'museum', 'library', 
+  'tourist_attraction', 'point_of_interest', 'church', 'natural_feature'
+];
+
+const PLACE_TYPE_MAPPING: Record<string, string> = {
+  'парк': 'park',
+  'кав\'ярня': 'cafe',
+  'кафе': 'cafe',
+  'ресторан': 'restaurant',
+  'магазин': 'store',
+  'музей': 'museum',
+  'бібліотека': 'library',
+  'церква': 'church',
+  'пляж': 'natural_feature',
+  'озеро': 'natural_feature',
+  'річка': 'natural_feature',
+};
+
+// ─── Google Maps API Wrappers ───────────────────────────────────────────────────
 
 /**
- * LLM PARSER MOCK: Заглушка для парсингу через AI (наприклад Gemini).
- * Очікує короткий промпт від користувача і повертає структуровані вимоги.
+ * Ensures Google Places service is available and returns an instance
  */
-async function parsePromptWithLLM(text: string): Promise<ParsedPrompt> {
-  // TODO: Замінити на реальний виклик Gemini/OpenAI API у майбутньому
-  const lowerText = text.toLowerCase();
-  const isExploration = lowerText.includes('прогул') || lowerText.includes('walk') || lowerText.includes('around');
-  
-  const poiKeywords: string[] = [];
-  if (lowerText.includes('кафе') || lowerText.includes('cafe') || lowerText.includes('coffee')) poiKeywords.push('cafe');
-  if (lowerText.includes('парк') || lowerText.includes('park')) poiKeywords.push('park');
-  if (lowerText.includes('музей') || lowerText.includes('museum')) poiKeywords.push('museum');
-  if (lowerText.includes('магазин') || lowerText.includes('shop')) poiKeywords.push('store');
-
-  if (poiKeywords.length === 0) poiKeywords.push('point of interest'); // fallback
-
-  return {
-    poiKeywords,
-    isExploration
-  };
+function getPlacesService(): google.maps.places.PlacesService {
+  if (!window.google || !window.google.maps || !window.google.maps.places) {
+    throw new Error("Google Maps Places API is not loaded.");
+  }
+  // PlacesService requires an HTML element, we can use a dummy div
+  return new google.maps.places.PlacesService(document.createElement('div'));
 }
 
-export function parseRouteRequest(text: string) {
-  // Stub to prevent UI crashes if this is still imported somewhere
-  return {
-    destinationType: null,
-    destinationName: null,
-    waypointTypes: [],
-    waypointNames: [],
-    isExplorationMode: true,
-  };
-}
-
-/**
- * Пошук конкретної будівлі/місця за назвою через Google Places
- */
-export async function findPlaceByName(
-  placeName: string,
-  userLocation: [number, number] // [lng, lat]
-): Promise<Place | null> {
-  const maps = await loadGoogleMaps(["places", "geometry"]);
-  const dummyDiv = document.createElement('div');
-  const placesService = new maps.places.PlacesService(dummyDiv);
-  const loc = new maps.LatLng(userLocation[1], userLocation[0]);
-
+export async function findPlaceByName(placeName: string, userLocation: [number, number]): Promise<Place | null> {
   return new Promise((resolve) => {
-    placesService.findPlaceFromQuery({
+    const service = getPlacesService();
+    const request: google.maps.places.TextSearchRequest = {
       query: placeName,
-      fields: ['name', 'geometry', 'place_id', 'formatted_address'],
-      locationBias: { radius: 50000, center: loc }
-    }, (results: any, status: any) => {
-      if (status === maps.places.PlacesServiceStatus.OK && results && results[0]) {
+      location: new google.maps.LatLng(userLocation[1], userLocation[0]),
+      radius: 50000, // 50km
+    };
+
+    service.textSearch(request, (results, status) => {
+      if (status === google.maps.places.PlacesServiceStatus.OK && results && results.length > 0) {
         const place = results[0];
         resolve({
           name: place.name || placeName,
-          coordinates: [place.geometry.location.lng(), place.geometry.location.lat()],
-          type: 'custom',
+          coordinates: [place.geometry!.location!.lng(), place.geometry!.location!.lat()],
+          type: place.types?.[0] || 'custom',
           address: place.formatted_address,
-          source: 'google'
+          rating: place.rating,
+          userRatingsTotal: place.user_ratings_total,
+          source: 'google',
+          externalId: place.place_id,
         });
       } else {
         resolve(null);
@@ -131,419 +106,316 @@ export async function findPlaceByName(
   });
 }
 
-/**
- * Пошук найближчого місця за типом через Google Places API
- */
-export async function findNearestPlace(
-  userLocation: [number, number], // [lng, lat]
-  placeType: string,
-  radius: number = 5000 // радіус пошуку в метрах
-): Promise<Place | null> {
-  const maps = await loadGoogleMaps(["places", "geometry"]);
-  const dummyDiv = document.createElement('div');
-  const placesService = new maps.places.PlacesService(dummyDiv);
-  const loc = new maps.LatLng(userLocation[1], userLocation[0]);
-
+async function findPlacesByGoogleType(center: [number, number], type: string, radius: number): Promise<Place[]> {
   return new Promise((resolve) => {
-    placesService.nearbySearch({
-      location: loc,
+    const service = getPlacesService();
+    const request: google.maps.places.PlaceSearchRequest = {
+      location: new google.maps.LatLng(center[1], center[0]),
       radius: radius,
-      keyword: placeType
-    }, (results: any, status: any) => {
-      if (status === maps.places.PlacesServiceStatus.OK && results && results[0]) {
-        const place = results[0];
-        resolve({
-          name: place.name || placeType,
-          coordinates: [place.geometry.location.lng(), place.geometry.location.lat()],
-          type: placeType,
-          address: place.vicinity,
-          source: 'google'
-        });
+      type: type,
+    };
+
+    service.nearbySearch(request, (results, status) => {
+      if (status === google.maps.places.PlacesServiceStatus.OK && results) {
+        const places: Place[] = results.map(p => ({
+          name: p.name || 'Unknown',
+          coordinates: [p.geometry!.location!.lng(), p.geometry!.location!.lat()],
+          type: type,
+          address: p.vicinity,
+          rating: p.rating,
+          userRatingsTotal: p.user_ratings_total,
+          source: 'google',
+          externalId: p.place_id,
+        }));
+        resolve(places);
       } else {
-        resolve(null);
+        resolve([]);
       }
     });
   });
 }
 
-/**
- * Пошук проміжної точки на маршруті
- */
-export async function findWaypointOnRoute(
-  start: [number, number], // [lng, lat]
-  end: [number, number], // [lng, lat]
-  waypointType: string
-): Promise<Place | null> {
-  const midLng = (start[0] + end[0]) / 2;
-  const midLat = (start[1] + end[1]) / 2;
-  return await findNearestPlace([midLng, midLat], waypointType, 2000);
-}
+// ─── Enhanced POI Discovery & Filtering ─────────────────────────────────────────
 
-/**
- * Фільтрує POI за різноманітністю типів
- */
-function filterPoisByDiversity(pois: RouteWaypoint[]): RouteWaypoint[] {
-  if (pois.length <= 6) return pois;
-
-  const typeGroups: Record<string, RouteWaypoint[]> = {};
-
-  for (const poi of pois) {
-    const type = poi.type || 'custom';
-    if (!typeGroups[type]) {
-      typeGroups[type] = [];
-    }
-    typeGroups[type].push(poi);
-  }
-
-  Object.values(typeGroups).forEach(group => {
-    group.sort((a, b) => (b.rating || 0) - (a.rating || 0));
-  });
-
-  const result: RouteWaypoint[] = [];
-  const maxPerType = 2;
-
-  const types = Object.keys(typeGroups).sort(
-    (a, b) => (typeGroups[b][0].rating || 0) - (typeGroups[a][0].rating || 0)
-  );
-
-  for (const type of types) {
-    result.push(...typeGroups[type].slice(0, maxPerType));
-    if (result.length >= 8) break;
-  }
-
-  return result.slice(0, 8);
-}
-
-/**
- * Сортує POI за якістю (рейтинг, кількість відгуків)
- */
-function rankPoisByQuality(pois: RouteWaypoint[]): RouteWaypoint[] {
-  return [...pois].sort((a, b) => {
-    const scoreA =
-      (a.rating || 3) * 0.7 + Math.min((a.userRatingsTotal || 0) / 100, 1) * 0.3;
-    const scoreB =
-      (b.rating || 3) * 0.7 + Math.min((b.userRatingsTotal || 0) / 100, 1) * 0.3;
-    return scoreB - scoreA;
-  });
-}
-
-interface PoiSearchSpec {
-  type?: string;
-  keyword?: string;
-  category: PoiCategory;
-}
-
-const KEYWORD_TO_SEARCH: Record<string, PoiSearchSpec> = {
-  cafe: { type: 'cafe', category: 'cafe' },
-  coffee: { type: 'cafe', keyword: 'coffee', category: 'cafe' },
-  park: { type: 'park', category: 'park' },
-  museum: { type: 'museum', category: 'museum' },
-  shop: { type: 'store', category: 'shop' },
-  store: { type: 'store', category: 'shop' },
-  restaurant: { type: 'restaurant', category: 'restaurant' },
-  library: { type: 'library', category: 'library' },
-  church: { type: 'church', category: 'place_of_worship' },
-  beach: { keyword: 'beach', category: 'beach' },
-  lake: { keyword: 'lake', category: 'lake' },
-  river: { keyword: 'river', category: 'river' },
-  landmark: { keyword: 'landmark', category: 'custom' },
-  attraction: { keyword: 'tourist attraction', category: 'custom' },
-  viewpoint: { keyword: 'viewpoint', category: 'custom' },
-  'point of interest': { keyword: 'point of interest', category: 'custom' },
-  'natural_feature': { keyword: 'natural feature', category: 'custom' },
-};
-
-const FALLBACK_SEARCHES: PoiSearchSpec[] = [
-  { type: 'park', category: 'park' },
-  { type: 'cafe', category: 'cafe' },
-  { keyword: 'landmark', category: 'custom' },
-  { keyword: 'tourist attraction', category: 'custom' },
-];
-
-const GOOGLE_TYPE_TO_CATEGORY: Record<string, PoiCategory> = {
-  cafe: 'cafe',
-  park: 'park',
-  museum: 'museum',
-  store: 'shop',
-  shopping_mall: 'shop',
-  restaurant: 'restaurant',
-  library: 'library',
-  church: 'place_of_worship',
-  place_of_worship: 'place_of_worship',
-  natural_feature: 'custom',
-  tourist_attraction: 'custom',
-  point_of_interest: 'custom',
-};
-
-function resolvePoiCategory(
-  googleTypes: string[] | undefined,
-  fallback: PoiCategory
-): PoiCategory {
-  if (!googleTypes) return fallback;
-  for (const t of googleTypes) {
-    if (GOOGLE_TYPE_TO_CATEGORY[t]) {
-      return GOOGLE_TYPE_TO_CATEGORY[t];
-    }
-  }
-  return fallback;
-}
-
-function passesRatingFilter(rating: number | undefined): boolean {
-  if (rating === undefined) return true;
-  return rating >= 3.5;
-}
-
-function buildSearchSpecs(keywords: string[]): PoiSearchSpec[] {
-  const specs: PoiSearchSpec[] = [];
-  const seen = new Set<string>();
-
-  for (const keyword of keywords) {
-    const normalized = keyword.toLowerCase().trim();
-    const spec = KEYWORD_TO_SEARCH[normalized];
-    const key = spec?.type || spec?.keyword || normalized;
-    if (!seen.has(key)) {
-      seen.add(key);
-      specs.push(spec || { keyword: normalized, category: 'custom' });
-    }
-  }
-
-  for (const fallback of FALLBACK_SEARCHES) {
-    const key = fallback.type || fallback.keyword || '';
-    if (!seen.has(key)) {
-      seen.add(key);
-      specs.push(fallback);
-    }
-  }
-
-  return specs;
-}
-
-/**
- * Пошук кількох POI навколо заданого центру через Google Places з мультитиповим пошуком
- */
 export async function searchComprehensivePois(
-  center: [number, number],
-  keywords: string[],
-  radiusMeters: number = 3000
-): Promise<RouteWaypoint[]> {
-  const maps = await loadGoogleMaps(["places", "geometry"]);
-  const dummyDiv = document.createElement('div');
-  const placesService = new maps.places.PlacesService(dummyDiv);
-  const centerLatLng = new maps.LatLng(center[1], center[0]);
+  center: [number, number], 
+  desiredTypes: string[], 
+  radius: number = 3000
+): Promise<Place[]> {
+  const allResults: Place[] = [];
+  const searchTypes = desiredTypes.length > 0 ? desiredTypes : EXTENDED_POI_TYPES;
+  
+  // Fetch from Google Places for each type
+  for (const type of searchTypes) {
+    const places = await findPlacesByGoogleType(center, type, radius);
+    allResults.push(...places);
+  }
 
-  const searchSpecs = buildSearchSpecs(keywords);
-
-  const searchOne = (spec: PoiSearchSpec): Promise<any[]> =>
-    new Promise((resolve) => {
-      const request: Record<string, unknown> = {
-        location: centerLatLng,
-        radius: radiusMeters,
-      };
-      if (spec.type) request.type = spec.type;
-      if (spec.keyword) request.keyword = spec.keyword;
-
-      placesService.nearbySearch(request as any, (results: any, status: any) => {
-        if (status === maps.places.PlacesServiceStatus.OK && results) {
-          resolve(results);
-        } else {
-          resolve([]);
-        }
-      });
-    });
-
-  const resultSets = await Promise.all(searchSpecs.map(searchOne));
-
-  const allPois: RouteWaypoint[] = [];
-  const seenPlaceIds = new Set<string>();
-
-  resultSets.forEach((places, specIndex) => {
-    const spec = searchSpecs[specIndex];
-    for (const place of places) {
-      const placeId = place.place_id;
-      if (!placeId || seenPlaceIds.has(placeId)) continue;
-      if (!passesRatingFilter(place.rating)) continue;
-
-      seenPlaceIds.add(placeId);
-      allPois.push({
-        location: [place.geometry.location.lat(), place.geometry.location.lng()],
-        name: place.name,
-        type: resolvePoiCategory(place.types, spec.category),
-        address: place.vicinity,
-        rating: place.rating,
-        userRatingsTotal: place.user_ratings_total,
-        source: 'google',
-      });
+  // Deduplicate by Place ID or rough coordinates/name
+  const uniquePlaces = new Map<string, Place>();
+  for (const place of allResults) {
+    const key = place.externalId || `${place.name}_${place.coordinates[0].toFixed(3)}`;
+    if (!uniquePlaces.has(key)) {
+      uniquePlaces.set(key, place);
     }
-  });
+  }
 
-  const ranked = rankPoisByQuality(allPois);
-  return filterPoisByDiversity(ranked);
+  const finalPois = Array.from(uniquePlaces.values());
+  return filterPoisByDiversity(finalPois);
 }
 
-/**
- * Збагачує POI додатковими даними (рейтинг, фото тощо).
- */
-export async function enrichPoiDetails(poi: Place): Promise<Place> {
-  return poi;
+function filterPoisByDiversity(pois: Place[]): Place[] {
+  const categoryCounts: Record<string, number> = {};
+  const diversePois: Place[] = [];
+
+  // Sort by rating first to ensure we pick the best of each category
+  const sortedPois = pois.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+
+  for (const poi of sortedPois) {
+    const cat = poi.type || 'custom';
+    if (!categoryCounts[cat]) categoryCounts[cat] = 0;
+    
+    // Cap at 2 per category to force diversity
+    if (categoryCounts[cat] < 2) {
+      diversePois.push(poi);
+      categoryCounts[cat]++;
+    }
+  }
+
+  return diversePois;
 }
 
-/**
- * Побудова маршруту через Google Maps Directions API
- */
+// ─── Route Building (Google Directions) ─────────────────────────────────────────
+
 export async function buildRoute(
   userLocation: [number, number], // [lng, lat]
   destination: [number, number], // [lng, lat]
-  waypoints: [number, number][] = [],
-  options?: { optimizeWaypoints?: boolean }
+  waypoints: [number, number][] = [] // [lng, lat]
 ): Promise<RouteResult> {
-  const maps = await loadGoogleMaps(["places"]);
-  const directionsService = new maps.DirectionsService();
+  return new Promise((resolve, reject) => {
+    if (!window.google || !window.google.maps || !window.google.maps.DirectionsService) {
+      return reject(new Error("Google Maps DirectionsService is not loaded."));
+    }
 
-  const originLatLng = new maps.LatLng(userLocation[1], userLocation[0]);
-  const destLatLng = new maps.LatLng(destination[1], destination[0]);
-  
-  const mappedWaypoints = waypoints.map(wp => ({
-    location: new maps.LatLng(wp[1], wp[0]),
-    stopover: true
-  }));
+    const directionsService = new google.maps.DirectionsService();
+    
+    const request: google.maps.DirectionsRequest = {
+      origin: new google.maps.LatLng(userLocation[1], userLocation[0]),
+      destination: new google.maps.LatLng(destination[1], destination[0]),
+      waypoints: waypoints.map(wp => ({
+        location: new google.maps.LatLng(wp[1], wp[0]),
+        stopover: true
+      })),
+      travelMode: google.maps.TravelMode.WALKING,
+      // We set optimizeWaypoints to false because we already optimized them via our 2-opt algorithm!
+      optimizeWaypoints: false, 
+    };
 
-  const response = await directionsService.route({
-    origin: originLatLng,
-    destination: destLatLng,
-    waypoints: mappedWaypoints,
-    travelMode: maps.TravelMode.WALKING,
-    optimizeWaypoints: options?.optimizeWaypoints ?? false,
+    directionsService.route(request, async (result, status) => {
+      if (status === google.maps.DirectionsStatus.OK && result) {
+        const route = result.routes[0];
+        const leg = route.legs[0]; // For simplicity, aggregate legs if multiple
+        
+        let totalDistanceMeters = 0;
+        let totalDurationSeconds = 0;
+        const points: [number, number][] = [];
+
+        route.legs.forEach(l => {
+          totalDistanceMeters += l.distance?.value || 0;
+          totalDurationSeconds += l.duration?.value || 0;
+          l.steps.forEach(step => {
+            step.path.forEach(latLng => {
+              points.push([latLng.lat(), latLng.lng()]);
+            });
+          });
+        });
+
+        const distanceKm = parseFloat((totalDistanceMeters / 1000).toFixed(2));
+        const estimatedTimeMinutes = Math.round(totalDurationSeconds / 60);
+
+        // Fetch Advanced Options (Elevation & Difficulty)
+        const elevationProfile = await calculateElevationProfile(points);
+        const difficulty = calculateRouteDifficulty(distanceKm, elevationProfile, 1.0); // Default terrain mult
+
+        const waypointsWithNames = waypoints.map((wp, index) => ({
+          location: [wp[1], wp[0]] as [number, number],
+          name: `Stop ${index + 1}`,
+          type: 'custom' as PoiCategory,
+        }));
+
+        resolve({
+          points,
+          waypoints: waypointsWithNames,
+          distanceKm,
+          estimatedTimeMinutes,
+          locations: [],
+          difficulty,
+          elevation: elevationProfile || undefined
+        });
+      } else {
+        reject(new Error(`Failed to build route: ${status}`));
+      }
+    });
   });
-
-  if (!response.routes || response.routes.length === 0) {
-    throw new Error("Не вдалося побудувати маршрут.");
-  }
-
-  const route = response.routes[0];
-  let distanceMeters = 0;
-  let timeSeconds = 0;
-  
-  route.legs.forEach((leg: any) => {
-    distanceMeters += leg.distance?.value || 0;
-    timeSeconds += leg.duration?.value || 0;
-  });
-
-  const points = route.overview_path.map((p: any) => [p.lat(), p.lng()] as [number, number]);
-
-  const waypointsWithNames = waypoints.map((wp, index) => ({
-    location: [wp[1], wp[0]] as [number, number],
-    name: `Проміжна точка ${index + 1}`,
-    type: 'custom' as PoiCategory,
-  }));
-
-  return {
-    points,
-    waypoints: waypointsWithNames,
-    distanceKm: parseFloat((distanceMeters / 1000).toFixed(2)),
-    estimatedTimeMinutes: Math.round(timeSeconds / 60),
-    locations: []
-  };
 }
 
-/**
- * Генерує прогулянковий маршрут з кількома POI навколо користувача.
- */
+// ─── Route Generation Orchestrators ─────────────────────────────────────────────
+
 export async function generateExplorationRoute(
-  userLocation: [number, number], // [lng, lat]
+  userLocation: [number, number], 
   options: {
     types: string[];
     desiredPoiCount?: number;
     targetDistanceKm?: number;
   }
 ): Promise<RouteResult> {
-  const { types, desiredPoiCount = 6, targetDistanceKm } = options;
+  const { types, desiredPoiCount = 6 } = options;
 
-  const effectiveTypes = types.length > 0 ? types : ['park', 'cafe', 'museum'];
-  const allPois = await searchComprehensivePois(userLocation, effectiveTypes, 3000);
+  // 1. Search comprehensive & diverse POIs
+  const nearbyPois = await searchComprehensivePois(userLocation, types, 3000);
 
-  if (allPois.length === 0) throw new Error('Поруч не вдалося знайти цікаві місця.');
-
-  const { selectBestWaypoints, sequenceWaypoints, validateRoute } = await import('./waypointOptimizer');
-
-  const selectedPois = await selectBestWaypoints(
-    allPois,
-    Math.min(desiredPoiCount, allPois.length),
-    userLocation,
-    userLocation
-  );
-
-  const sequencedPois = await sequenceWaypoints(selectedPois, userLocation, userLocation);
-
-  const validation = validateRoute(sequencedPois, userLocation, userLocation);
-  if (!validation.valid) {
-    console.warn('Route validation issues:', validation.issues);
+  if (nearbyPois.length === 0) {
+    throw new Error('Поруч не вдалося знайти цікаві місця для прогулянки. Спробуйте інший район.');
   }
 
-  const route = await buildRoute(
-    userLocation,
-    userLocation,
-    sequencedPois.map(wp => [wp.location[1], wp.location[0]]),
-    { optimizeWaypoints: false }
-  );
-  route.waypoints = sequencedPois;
-  route.locations = sequencedPois.map(wp => wp.name);
+  // 2. Select best waypoints using Tier 1 Scoring
+  const destinationPoi = nearbyPois[nearbyPois.length - 1]; // Pick a rough destination
+  const selectedPois = selectBestWaypoints(nearbyPois, desiredPoiCount, userLocation, destinationPoi.coordinates);
 
-  const { enrichRouteWithAdvancedOptions } = await import('./routeOptions');
-  route.options = await enrichRouteWithAdvancedOptions(route);
+  // 3. Sequence waypoints using Tier 2 (2-opt Algorithm) to prevent zigzagging
+  const sequencedPois = sequenceWaypoints(selectedPois, userLocation, userLocation); // Circular loop
+
+  const waypointCoords: [number, number][] = sequencedPois.map(p => p.coordinates);
+
+  // 4. Build Route
+  const route = await buildRoute(userLocation, userLocation, waypointCoords); // Loop back to start
+
+  // Map POIs to Waypoints and inject Terrain Data
+  route.waypoints = sequencedPois.map(wp => {
+    const terrain = getTerrainInfo(wp.type);
+    return {
+      location: [wp.coordinates[1], wp.coordinates[0]] as [number, number],
+      name: wp.name,
+      type: wp.type as PoiCategory,
+      address: wp.address,
+      rating: wp.rating,
+      userRatingsTotal: wp.userRatingsTotal,
+      description: `Surface: ${terrain.surfaceType} | Scenic Score: ${terrain.scenicScore}`,
+      source: 'google'
+    };
+  });
+
+  route.locations = sequencedPois.map(wp => wp.name);
   return route;
 }
 
-/**
- * Основна функція для створення маршруту на основі короткого текстового запиту користувача
- */
 export async function generateRouteFromText(
-  userLocation: [number, number], // [lng, lat]
+  userLocation: [number, number],
   text: string,
   options?: { routeMode?: "point_to_point" | "exploration" }
 ): Promise<RouteResult> {
-  const parsed = await parsePromptWithLLM(text);
+  const parsed = parseRouteRequest(text);
+  const forceExploration = options?.routeMode === "exploration";
+  const forcePointToPoint = options?.routeMode === "point_to_point";
 
-  if (parsed.isExploration || options?.routeMode === "exploration") {
+  if (!forcePointToPoint && (parsed.isExplorationMode || forceExploration)) {
+    const allTypes = [...new Set([...parsed.waypointTypes, parsed.destinationType].filter(Boolean) as string[])];
     return generateExplorationRoute(userLocation, {
-       types: parsed.poiKeywords,
+      types: allTypes,
+      desiredPoiCount: parsed.desiredPoiCount,
+      targetDistanceKm: parsed.targetDistance,
     });
   }
 
-  // Будуємо Point to Point маршрут
-  const allPois = await searchComprehensivePois(userLocation, parsed.poiKeywords, 3000);
-  if (allPois.length === 0) throw new Error("Не вдалося знайти відповідні місця для вашого запиту.");
-
-  const { selectBestWaypoints, sequenceWaypoints, validateRoute } = await import('./waypointOptimizer');
-
-  const selectedPois = await selectBestWaypoints(
-    allPois,
-    Math.min(allPois.length, 5),
-    userLocation,
-    allPois[0]?.location ? [allPois[0].location[1], allPois[0].location[0]] : userLocation
-  );
-
-  if (selectedPois.length === 0) throw new Error("Не вдалося знайти відповідні місця для вашого запиту.");
-
-  const destinationCoords = [selectedPois[selectedPois.length - 1].location[1], selectedPois[selectedPois.length - 1].location[0]] as [number, number];
-  const intermediateWaypoints = selectedPois.slice(0, -1);
-
-  const sequencedWaypoints = await sequenceWaypoints(intermediateWaypoints, userLocation, destinationCoords);
-
-  const validation = validateRoute(sequencedWaypoints, userLocation, destinationCoords);
-  if (!validation.valid) {
-    console.warn('Route validation issues:', validation.issues);
+  let destination: Place | null = null;
+  if (parsed.destinationName) {
+    destination = await findPlaceByName(parsed.destinationName, userLocation);
+  } else if (parsed.destinationType) {
+    const pois = await searchComprehensivePois(userLocation, [parsed.destinationType], 5000);
+    if (pois.length > 0) destination = pois[0];
   }
 
-  const route = await buildRoute(
-    userLocation,
-    destinationCoords,
-    sequencedWaypoints.map(wp => [wp.location[1], wp.location[0]]),
-    { optimizeWaypoints: false }
-  );
-  route.waypoints = [...sequencedWaypoints, selectedPois[selectedPois.length - 1]];
-  route.locations = route.waypoints.map(w => w.name);
+  if (!destination) {
+    throw new Error('Не вдалося визначити пункт призначення. Спробуйте уточнити запит.');
+  }
 
-  const { enrichRouteWithAdvancedOptions } = await import('./routeOptions');
-  route.options = await enrichRouteWithAdvancedOptions(route);
+  // Find Waypoints
+  let waypointPlaces: Place[] = [];
+  for (const wName of parsed.waypointNames) {
+    const wp = await findPlaceByName(wName, userLocation);
+    if (wp) waypointPlaces.push(wp);
+  }
+
+  if (parsed.waypointTypes.length > 0) {
+    const extraPois = await searchComprehensivePois(userLocation, parsed.waypointTypes, 3000);
+    waypointPlaces = [...waypointPlaces, ...selectBestWaypoints(extraPois, 2, userLocation, destination.coordinates)];
+  }
+
+  // Sequence to prevent weird overlaps
+  const sequencedWaypoints = sequenceWaypoints(waypointPlaces, userLocation, destination.coordinates);
+  const wayCoords: [number, number][] = sequencedWaypoints.map(w => w.coordinates);
+
+  const route = await buildRoute(userLocation, destination.coordinates, wayCoords);
+
+  route.locations = [destination.name, ...sequencedWaypoints.map(wp => wp.name)];
+  route.waypoints = sequencedWaypoints.map(wp => ({
+    location: [wp.coordinates[1], wp.coordinates[0]] as [number, number],
+    name: wp.name,
+    type: wp.type as PoiCategory,
+  }));
+
   return route;
+}
+
+// ─── Text Parsing Logic ─────────────────────────────────────────────────────────
+
+export function parseRouteRequest(text: string): {
+  destinationType: string | null;
+  destinationName: string | null;
+  waypointTypes: string[];
+  waypointNames: string[];
+  targetDistance?: number;
+  isExplorationMode?: boolean;
+  desiredPoiCount?: number;
+} {
+  const lowerText = text.toLowerCase();
+  let destinationType: string | null = null;
+  let destinationName: string | null = null;
+  const waypointTypes: string[] = [];
+  const waypointNames: string[] = [];
+
+  const containsBaseForm = (txt: string, baseForm: string): boolean => {
+    return txt.includes(baseForm.toLowerCase());
+  };
+
+  const specificNamePatterns = [
+    /до\s+([А-Яа-яІіЇїЄєҐґA-Za-z0-9\s]{3,})/i,
+    /через\s+([А-Яа-яІіЇїЄєҐґA-Za-z0-9\s]{3,})/i
+  ];
+
+  for (const pattern of specificNamePatterns) {
+    const match = text.match(pattern);
+    if (match && match[1]) {
+      const name = match[1].trim();
+      if (!destinationName) destinationName = name;
+      else waypointNames.push(name);
+    }
+  }
+
+  for (const [key, value] of Object.entries(PLACE_TYPE_MAPPING)) {
+    if (containsBaseForm(lowerText, key)) {
+      if (!destinationType) destinationType = value;
+      else waypointTypes.push(value);
+    }
+  }
+
+  const isExplorationMode = lowerText.includes('прогулянка') || lowerText.includes('прогулятись');
+
+  let desiredPoiCount = 6;
+  const countMatch = text.match(/(\d+)\s*(зупинок|місць|точок)/i);
+  if (countMatch && countMatch[1]) {
+    desiredPoiCount = Math.max(2, Math.min(parseInt(countMatch[1]), 10));
+  }
+
+  return { destinationType, destinationName, waypointTypes, waypointNames, isExplorationMode, desiredPoiCount };
 }

@@ -1,50 +1,35 @@
-export type RouteDifficulty = 'Easy' | 'Moderate' | 'Challenging';
+import { Place } from '../services/routeService';
+
+export type RouteDifficulty = "Easy" | "Moderate" | "Challenging";
+
+export interface RouteEnhancementOptions {
+  avoidSteepHills?: boolean;
+  preferScenic?: boolean;
+  targetDifficulty?: RouteDifficulty;
+}
 
 export interface WaypointScore {
+  place: Place;
   qualityScore: number;
   positionScore: number;
   combinedScore: number;
-  rating: number;
-  reviewCount: number;
-  popularity: number;
 }
 
-export interface RouteOptions {
-  difficulty?: RouteDifficulty;
-  elevationGain?: number;
-  elevationLoss?: number;
-  maxElevation?: number;
-  avgGradient?: number;
-  terrainTypes?: string[];
-  scenicScore?: number;
-  walkability?: number;
-}
-
-export interface ElevationPoint {
-  lat: number;
-  lng: number;
-  elevation: number;
+export interface TerrainInfo {
+  surfaceType: "paved" | "gravel" | "natural" | "mixed";
+  scenicScore: number;
+  difficultyMultiplier: number;
 }
 
 export interface ElevationProfile {
   totalGain: number;
   totalLoss: number;
-  maxElevation: number;
-  minElevation: number;
-  averageGradient: number;
-  points: ElevationPoint[];
+  points: { distance: number; elevation: number; lat: number; lng: number }[];
 }
 
-export interface TerrainInfo {
-  type: 'paved' | 'natural' | 'gravel' | 'mixed' | 'unknown';
-  difficulty: number;
-  scenicValue: number;
-  accessibility: number;
-}
-
-export interface DistanceMatrix {
-  distances: number[][];
-  durations: number[][];
-  origins: [number, number][];
-  destinations: [number, number][];
+export interface RouteAnalysis {
+  difficulty: RouteDifficulty;
+  elevation?: ElevationProfile;
+  averageScenicScore: number;
+  terrainTypes: string[];
 }
