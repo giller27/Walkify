@@ -10,6 +10,8 @@ import {
   calculateRemainingRouteStats,
   formatRemainingRouteSummary,
   getStepRemainingToEnd,
+  buildCumulativeDistancesKm,
+  isLoopRoute,
 } from "../utils/routeTracking";
 import PlaceInfoCard from "./PlaceInfoCard";
 import NavigationStepsPanel from "./NavigationStepsPanel";
@@ -130,6 +132,9 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
     const [hasActiveRoute, setHasActiveRoute] = useState(false);
     const currentRouteRef = useRef<RouteResult | null>(null);
     const maxProgressIndexRef = useRef(0);
+    const maxTraveledKmRef = useRef(0);
+    const cumulativeDistancesRef = useRef<number[]>([]);
+    const isLoopRouteRef = useRef(false);
     const onRouteSummaryRef = useRef(onRouteSummary);
 
     useEffect(() => {
@@ -171,13 +176,16 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
       const progress = findRouteProgress(
         route.points,
         userLngLat,
-        maxProgressIndexRef.current
+        maxProgressIndexRef.current,
+        maxTraveledKmRef.current,
+        cumulativeDistancesRef.current
       );
 
       if (progress.distanceFromRouteKm > 0.12) return;
 
       const idx = Math.max(maxProgressIndexRef.current, progress.segmentIndex);
       maxProgressIndexRef.current = idx;
+      maxTraveledKmRef.current = Math.max(maxTraveledKmRef.current, progress.traveledKm);
 
       const snap = { lat: progress.snappedPoint[0], lng: progress.snappedPoint[1] };
       const toLatLng = (p: [number, number]) => ({ lat: p[0], lng: p[1] });
@@ -200,7 +208,8 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
           route.steps,
           [userLngLat[1], userLngLat[0]],
           idx,
-          route.points.length
+          route.points.length,
+          isLoopRouteRef.current
         );
         setCurrentStepIndex(stepIdx);
         const step = route.steps[stepIdx];
@@ -209,7 +218,14 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
         }
       }
 
-      const stats = calculateRemainingRouteStats(route, idx, stepIdx);
+      const totalRouteKm = cumulativeDistancesRef.current.at(-1) ?? route.distanceKm;
+      const stats = calculateRemainingRouteStats(
+        route,
+        idx,
+        stepIdx,
+        maxTraveledKmRef.current,
+        totalRouteKm
+      );
       onRouteSummaryRef.current?.(formatRemainingRouteSummary(stats, route.difficulty));
     }, []);
 
@@ -291,6 +307,9 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
       setHasActiveRoute(false);
       currentRouteRef.current = null;
       maxProgressIndexRef.current = 0;
+      maxTraveledKmRef.current = 0;
+      cumulativeDistancesRef.current = [];
+      isLoopRouteRef.current = false;
     }, [clearRouteLines]);
 
     const displayRoute = useCallback((route: RouteResult) => {
@@ -304,6 +323,9 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
 
       currentRouteRef.current = route;
       maxProgressIndexRef.current = 0;
+      maxTraveledKmRef.current = 0;
+      cumulativeDistancesRef.current = buildCumulativeDistancesKm(route.points);
+      isLoopRouteRef.current = isLoopRoute(route.points);
       setHasActiveRoute(true);
       setCurrentStepIndex(0);
       setCurrentStepRemaining(null);
