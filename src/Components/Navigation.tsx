@@ -38,6 +38,7 @@ import {
 import { supabase } from "../services/supabaseService";
 import { areUsersBlocked } from "../services/chatService";
 import "../styles/home.css";
+import "../styles/app-pages.css";
 
 interface GoogleUser {
   name: string;
@@ -505,7 +506,7 @@ function AppRoutes() {
         </div>
       )}
       {!isHome && (
-        <div className="app-page-layer app-page-front">
+        <div className="app-page-layer app-page-front app-page-scroll">
           <Routes location={location}>
             <Route path="/profile" Component={Profile} />
             <Route path="/favs" Component={Favorites} />

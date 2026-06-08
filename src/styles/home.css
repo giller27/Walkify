@@ -93,7 +93,7 @@
 .home-save-btn {
   position: absolute;
   right: 12px;
-  bottom: 72px;
+  bottom: 88px;
   z-index: 1080;
   width: 44px;
   height: 44px;
@@ -223,9 +223,13 @@
     bottom: max(80px, calc(env(safe-area-inset-bottom) + 64px)) !important;
   }
 
+  .home-save-btn {
+    bottom: max(96px, calc(env(safe-area-inset-bottom) + 80px));
+  }
+
   .home-route-chip {
     top: auto;
-    bottom: max(140px, calc(env(safe-area-inset-bottom) + 120px));
+    bottom: max(152px, calc(env(safe-area-inset-bottom) + 132px));
     left: 50%;
     right: auto;
     transform: translateX(-50%);

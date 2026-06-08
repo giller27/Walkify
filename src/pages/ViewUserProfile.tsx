@@ -140,15 +140,8 @@ function ViewUserProfile() {
     (sum, stat) => sum + stat.duration_minutes,
     0
   );
-  const avgPace =
-    totalWalks > 0
-      ? (
-          statistics.reduce((sum, stat) => sum + stat.pace, 0) / totalWalks
-        ).toFixed(2)
-      : 0;
-
   return (
-    <Container className="mt-5 pt-5 mb-5">
+    <Container className="py-3 mb-3">
       <Row className="mb-5">
         <Col lg={4} md={6} className="mx-auto">
           <Card className="profile-card text-center shadow-sm">
@@ -228,8 +221,8 @@ function ViewUserProfile() {
                 className="mt-4 pt-4"
                 style={{ borderTop: "1px solid #eee" }}
               >
-                <Row className="text-center mb-3">
-                  <Col xs={6} className="mb-3">
+                <Row className="text-center">
+                  <Col xs={4} className="mb-3">
                     <div>
                       <h5 className="mb-1" style={{ color: "#28a745" }}>
                         {totalWalks}
@@ -237,7 +230,7 @@ function ViewUserProfile() {
                       <p className="text-muted mb-0">Прогулянок</p>
                     </div>
                   </Col>
-                  <Col xs={6} className="mb-3">
+                  <Col xs={4} className="mb-3">
                     <div>
                       <h5 className="mb-1" style={{ color: "#28a745" }}>
                         {totalDistance} км
@@ -245,10 +238,7 @@ function ViewUserProfile() {
                       <p className="text-muted mb-0">Відстані</p>
                     </div>
                   </Col>
-                </Row>
-
-                <Row className="text-center">
-                  <Col xs={6} className="mb-3">
+                  <Col xs={4} className="mb-3">
                     <div>
                       <h5 className="mb-1" style={{ color: "#28a745" }}>
                         {(totalTime / 60).toFixed(1)} год
@@ -256,22 +246,14 @@ function ViewUserProfile() {
                       <p className="text-muted mb-0">Часу</p>
                     </div>
                   </Col>
-                  <Col xs={6} className="mb-3">
-                    <div>
-                      <h5 className="mb-1" style={{ color: "#28a745" }}>
-                        {avgPace} км/год
-                      </h5>
-                      <p className="text-muted mb-0">Швидкість</p>
-                    </div>
-                  </Col>
                 </Row>
               </div>
-              <div className="d-flex gap-2 mt-4">
+              <div className="profile-actions mt-4">
                 {currentUser && profile?.id !== currentUser.id && (
                   <>
                     <Button
                       variant="success"
-                      className="flex-grow-1"
+                      className="profile-actions-primary"
                       onClick={() => navigate(`/chat?with=${profile?.id}`)}
                       disabled={isBlockedByMe}
                     >
@@ -280,6 +262,7 @@ function ViewUserProfile() {
                     </Button>
                     <Button
                       variant={isBlockedByMe ? "outline-secondary" : "outline-danger"}
+                      className="profile-actions-secondary"
                       onClick={handleToggleBlock}
                       disabled={blockLoading}
                     >
@@ -295,7 +278,11 @@ function ViewUserProfile() {
                 )}
                 <Button
                   variant="outline-success"
-                  className={currentUser && profile?.id !== currentUser.id ? "" : "w-100"}
+                  className={
+                    currentUser && profile?.id !== currentUser.id
+                      ? "profile-actions-secondary w-100 w-sm-auto"
+                      : "w-100"
+                  }
                   onClick={() => navigate("/home")}
                 >
                   <i className="bi bi-house me-2"></i>

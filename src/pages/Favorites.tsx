@@ -330,7 +330,7 @@ function Favorites() {
           height={200}
         />
         <Card.Body>
-          <div className="d-flex justify-content-between align-items-start gap-2 mb-1">
+          <div className="route-card-title-row mb-1">
             <Card.Title className="text-truncate mb-0 flex-grow-1">{item.name}</Card.Title>
             {showLikes && (
               <span className="badge bg-light text-dark border flex-shrink-0">
@@ -359,7 +359,7 @@ function Favorites() {
             )}
           </div>
 
-          <div className="d-grid gap-2">
+          <div className="route-card-actions">
             {showLikes && (
               <Button
                 variant={isLiked ? "danger" : "outline-danger"}
@@ -505,7 +505,7 @@ function Favorites() {
   }
 
   return (
-    <div className="px-3 py-3">
+    <div className="favorites-page">
       <h1 className="mb-4">
         <i className="bi bi-heart-fill text-danger me-2"></i>
         Маршрути
@@ -513,7 +513,7 @@ function Favorites() {
 
       {error && <Alert variant="danger">{error}</Alert>}
 
-      <Nav variant="tabs" className="mb-4">
+      <Nav variant="tabs" className="mb-4 favorites-nav">
         {user && (
           <Nav.Item>
             <Nav.Link
@@ -590,10 +590,10 @@ function Favorites() {
         </>
       ) : activeTab === "public" ? (
         <>
-          <Card className="mb-3 border-0 shadow-sm">
+          <Card className="mb-3 border-0 shadow-sm public-routes-filter">
             <Card.Body className="py-3">
-              <div className="d-flex flex-wrap align-items-end gap-3">
-                <div>
+              <Row className="g-3 align-items-end">
+                <Col xs={12} sm={6} md={4} lg={3}>
                   <label className="form-label small fw-semibold mb-1">
                     Радіус від вас
                   </label>
@@ -609,21 +609,26 @@ function Favorites() {
                       </option>
                     ))}
                   </select>
-                </div>
-                <Button
-                  variant="outline-success"
-                  size="sm"
-                  onClick={requestUserLocation}
-                >
-                  <i className="bi bi-crosshair me-1"></i>
-                  Моя локація
-                </Button>
-                <small className="text-muted">
-                  {userLocation
-                    ? "Список відсортовано за лайками поруч із вами"
-                    : "Увімкніть геолокацію для фільтра за відстанню"}
-                </small>
-              </div>
+                </Col>
+                <Col xs={12} sm="auto">
+                  <Button
+                    variant="outline-success"
+                    size="sm"
+                    className="w-100 w-sm-auto"
+                    onClick={requestUserLocation}
+                  >
+                    <i className="bi bi-crosshair me-1"></i>
+                    Моя локація
+                  </Button>
+                </Col>
+                <Col xs={12} md>
+                  <p className="filter-hint text-muted">
+                    {userLocation
+                      ? "Список відсортовано за лайками поруч із вами"
+                      : "Увімкніть геолокацію для фільтра за відстанню"}
+                  </p>
+                </Col>
+              </Row>
               {locationError && (
                 <Alert variant="warning" className="mt-2 mb-0 py-2 small">
                   {locationError}

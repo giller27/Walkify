@@ -82,8 +82,6 @@ function Statistic() {
     0
   );
   const totalTimeHours = totalTimeMinutes / 60;
-  const averageSpeedKmh =
-    totalTimeMinutes > 0 ? totalDistance / (totalTimeMinutes / 60) : 0;
 
   // Статистика по днях тижня
   const dayStats: { [key: string]: number } = {
@@ -203,8 +201,8 @@ function Statistic() {
             }
             @media (min-width: 992px) {
               .stat-metric {
-                flex: 0 0 25% !important;
-                max-width: 25% !important;
+                flex: 0 0 33.333% !important;
+                max-width: 33.333% !important;
               }
             }
           `}</style>
@@ -256,21 +254,6 @@ function Statistic() {
               </Card>
             </Col>
 
-            <Col xs={12} className="stat-metric">
-              <Card className="h-100 border-success">
-                <Card.Body className="text-center">
-                  <div className="display-4 text-success mb-2">
-                    <i className="bi bi-speedometer2"></i>
-                  </div>
-                  <Card.Title className="text-muted small">
-                    Середня швидкість
-                  </Card.Title>
-                  <h2 className="mb-0">
-                    {averageSpeedKmh.toFixed(2)} км/год
-                  </h2>
-                </Card.Body>
-              </Card>
-            </Col>
           </Row>
 
           <Row className="g-3">
@@ -377,7 +360,7 @@ function Statistic() {
                             {stat.distance_km.toFixed(1)} км
                           </div>
                           <div className="small text-muted">
-                            {stat.pace.toFixed(1)} км/год
+                            {getWalkDurationMinutes(stat).toFixed(0)} хв
                           </div>
                         </div>
                       </div>

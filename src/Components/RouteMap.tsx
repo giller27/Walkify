@@ -22,6 +22,7 @@ import {
 import { syncPendingWalkStatistics } from "../services/walkStatisticSync";
 import PlaceInfoCard from "./PlaceInfoCard";
 import NavigationStepsPanel from "./NavigationStepsPanel";
+import RouteCompletionCelebration from "./RouteCompletionCelebration";
 
 export interface WalkPreferences {
   prompt: string;
@@ -138,7 +139,9 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
       durationSeconds: number;
     } | null>(null);
     const [hasActiveRoute, setHasActiveRoute] = useState(false);
+    const [showRouteCompletion, setShowRouteCompletion] = useState(false);
     const currentRouteRef = useRef<RouteResult | null>(null);
+    const routeCompletedRef = useRef(false);
     const maxProgressIndexRef = useRef(0);
     const maxTraveledKmRef = useRef(0);
     const cumulativeDistancesRef = useRef<number[]>([]);
@@ -255,6 +258,23 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
       onRouteSummaryRef.current?.(formatRemainingRouteSummary(stats, route.difficulty));
 
       updateWalkProgressTraveledKm(maxTraveledKmRef.current, totalRouteKm);
+
+      const traveledRatio =
+        totalRouteKm > 0 ? maxTraveledKmRef.current / totalRouteKm : 0;
+      const nearEnd =
+        stats.remainingDistanceKm < 0.08 ||
+        traveledRatio >= 0.95 ||
+        (idx >= route.points.length - 2 && progress.distanceFromRouteKm < 0.08);
+
+      if (
+        !routeCompletedRef.current &&
+        totalRouteKm > 0.15 &&
+        nearEnd
+      ) {
+        routeCompletedRef.current = true;
+        setShowRouteCompletion(true);
+        onRouteSummaryRef.current?.("Маршрут завершено! 🎉");
+      }
     }, []);
 
     const startLocationTracking = useCallback(() => {
@@ -338,6 +358,8 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
       maxTraveledKmRef.current = 0;
       cumulativeDistancesRef.current = [];
       isLoopRouteRef.current = false;
+      routeCompletedRef.current = false;
+      setShowRouteCompletion(false);
       const finishedSession = finishWalkProgressSession();
       if (finishedSession) {
         syncPendingWalkStatistics()
@@ -360,6 +382,8 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
       setSelectedPoi(null);
 
       currentRouteRef.current = route;
+      routeCompletedRef.current = false;
+      setShowRouteCompletion(false);
       maxProgressIndexRef.current = 0;
       maxTraveledKmRef.current = 0;
       cumulativeDistancesRef.current = buildCumulativeDistancesKm(route.points);
@@ -596,6 +620,11 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
             onClose={() => setSelectedPoi(null)}
           />
         )}
+
+        <RouteCompletionCelebration
+          show={showRouteCompletion}
+          onDone={() => setShowRouteCompletion(false)}
+        />
       </>
     );
   }
