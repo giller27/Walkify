@@ -7,6 +7,7 @@ import {
   UserProfile,
   getUserProfile,
 } from "../services/supabaseService";
+import { syncPendingWalkStatistics } from "../services/walkStatisticSync";
 
 interface AuthContextType {
   user: User | null;
@@ -39,6 +40,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
             // Користувач авторизований, але профіль не завантажується - це окей
             setProfile(null);
           }
+          syncPendingWalkStatistics().catch((err) =>
+            console.error("[Walkify] Синхронізація статистики при завантаженні:", err)
+          );
         }
       } catch (error) {
         console.error("Error checking user:", error);
@@ -60,6 +64,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
           console.error("Error fetching profile:", error);
           setProfile(null);
         }
+        syncPendingWalkStatistics().catch((err) =>
+          console.error("[Walkify] Синхронізація статистики після входу:", err)
+        );
       } else {
         setUser(null);
         setProfile(null);

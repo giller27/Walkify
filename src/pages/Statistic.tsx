@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Card, Row, Col, Alert, Spinner } from "react-bootstrap";
 import { useAuth } from "../context/AuthContext";
 import * as supabaseModules from "../services/supabaseService";
+import { syncPendingWalkStatistics } from "../services/walkStatisticSync";
 
 interface WalkStat {
   id?: string;
@@ -31,6 +32,7 @@ function Statistic() {
       try {
         setLoading(true);
         setError(null);
+        await syncPendingWalkStatistics();
         let allStats = await supabaseModules.getUserWalkStatistics(user.id);
         // Упорядковуємо по даті з найновішим першим
         allStats = allStats.sort(

@@ -19,6 +19,7 @@ import {
   finishWalkProgressSession,
   loadWalkProgress,
 } from "../utils/walkProgressStorage";
+import { syncPendingWalkStatistics } from "../services/walkStatisticSync";
 import PlaceInfoCard from "./PlaceInfoCard";
 import NavigationStepsPanel from "./NavigationStepsPanel";
 
@@ -336,7 +337,16 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
       maxTraveledKmRef.current = 0;
       cumulativeDistancesRef.current = [];
       isLoopRouteRef.current = false;
-      finishWalkProgressSession();
+      const finishedSession = finishWalkProgressSession();
+      if (finishedSession) {
+        syncPendingWalkStatistics()
+          .then((result) => {
+            if (result.synced > 0) {
+              console.log('[Walkify] Статистику завантажено на сервер:', result);
+            }
+          })
+          .catch((err) => console.error('[Walkify] Синхронізація статистики:', err));
+      }
     }, [clearRouteLines]);
 
     const displayRoute = useCallback((route: RouteResult) => {
@@ -355,6 +365,9 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
       isLoopRouteRef.current = isLoopRoute(route.points);
       const totalRouteKm = cumulativeDistancesRef.current.at(-1) ?? route.distanceKm;
       startWalkProgressSession(totalRouteKm);
+      syncPendingWalkStatistics().catch((err) =>
+        console.error('[Walkify] Синхронізація попередньої прогулянки:', err)
+      );
       setHasActiveRoute(true);
       setCurrentStepIndex(0);
       setCurrentStepRemaining(null);
