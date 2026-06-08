@@ -4,7 +4,9 @@ import { generateRouteFromText, RouteResult, RouteWaypoint } from "../services/r
 import { reverseGeocode } from "../services/placesService";
 import type { SavedRoute } from "../services/supabaseService";
 import type { RouteDifficulty } from "../types/routeEnhancements";
+import { findClosestPointIndex, findCurrentStepIndex } from "../utils/routeTracking";
 import PlaceInfoCard from "./PlaceInfoCard";
+import NavigationStepsPanel from "./NavigationStepsPanel";
 
 export interface WalkPreferences {
   prompt: string;
@@ -21,6 +23,7 @@ export interface RouteMapRef {
   getCurrentRoute: () => RouteResult | null;
   clearCurrentRoute: () => void;
   isGenerating: boolean;
+  centerOnUser: () => void;
 }
 
 interface RouteMapProps {
@@ -35,6 +38,7 @@ interface RouteMapProps {
   panelExpanded?: boolean;
   pickDestinationMode?: boolean;
   onDestinationPicked?: (coords: [number, number], address: string) => void;
+  onPickCancel?: () => void;
 }
 
 const TYPE_COLOR_MAP: Record<string, string> = {
@@ -46,16 +50,7 @@ const TYPE_COLOR_MAP: Record<string, string> = {
   movie_theater: "#7e57c2", night_club: "#c2185b", playground: "#66bb6a",
 };
 
-const TYPE_EMOJI: Record<string, string> = {
-  cafe: "☕", park: "🌿", restaurant: "🍽️", shop: "🛍️", store: "🛍️",
-  museum: "🏛️", library: "📚", church: "⛪", beach: "🏖️",
-  lake: "🌊", river: "🌊", tourist_attraction: "⭐", custom: "📍",
-  bakery: "🥐", art_gallery: "🎨", book_store: "📖", shopping_mall: "🏬",
-  gym: "💪", spa: "🧖", zoo: "🦁", stadium: "🏟️",
-  movie_theater: "🎬", night_club: "🎵", playground: "🛝",
-};
-
-function createSvgIcon(emoji: string, color: string, label?: string): google.maps.Icon {
+function createSvgIcon(emoji: string, color: string): google.maps.Icon {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 36 36">
     <circle cx="18" cy="18" r="15" fill="${color}" stroke="#fff" stroke-width="2.5"/>
     <text x="18" y="23" font-size="14" text-anchor="middle" font-family="sans-serif">${emoji}</text>
@@ -79,77 +74,221 @@ function createNumberedIcon(number: number, color: string): google.maps.Icon {
   };
 }
 
+function createUserLocationIcon(heading: number): google.maps.Icon {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="52" height="52" viewBox="0 0 52 52">
+    <g transform="rotate(${heading}, 26, 26)">
+      <path d="M26 6 C26 6 34 22 34 28 C34 32 30 36 26 36 C22 36 18 32 18 28 C18 22 26 6 26 6Z" fill="#4285F4" fill-opacity="0.55" stroke="#4285F4" stroke-width="1"/>
+    </g>
+    <circle cx="26" cy="26" r="8" fill="#4285F4" stroke="#fff" stroke-width="3"/>
+    <circle cx="26" cy="26" r="3" fill="#fff"/>
+  </svg>`;
+  return {
+    url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg),
+    scaledSize: new google.maps.Size(52, 52),
+    anchor: new google.maps.Point(26, 26),
+  };
+}
+
+function getCompassHeading(event: DeviceOrientationEvent): number | null {
+  const e = event as DeviceOrientationEvent & { webkitCompassHeading?: number };
+  if (typeof e.webkitCompassHeading === 'number') {
+    return e.webkitCompassHeading;
+  }
+  if (event.absolute && event.alpha !== null) {
+    return (360 - event.alpha) % 360;
+  }
+  return null;
+}
+
 const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
-  ({ onRouteSummary, onRouteGenerated, panelExpanded = true, pickDestinationMode, onDestinationPicked }, ref) => {
+  ({ onRouteSummary, onRouteGenerated, pickDestinationMode, onDestinationPicked, onPickCancel }, ref) => {
     const mapContainerRef = useRef<HTMLDivElement>(null);
     const mapRef = useRef<google.maps.Map | null>(null);
-    const routeLineRef = useRef<google.maps.Polyline | null>(null);
+    const traveledLineRef = useRef<google.maps.Polyline | null>(null);
+    const remainingLineRef = useRef<google.maps.Polyline | null>(null);
     const markersRef = useRef<google.maps.Marker[]>([]);
     const destinationMarkerRef = useRef<google.maps.Marker | null>(null);
+    const userMarkerRef = useRef<google.maps.Marker | null>(null);
     const mapClickListenerRef = useRef<google.maps.MapsEventListener | null>(null);
-    const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
+    const watchIdRef = useRef<number | null>(null);
+    const headingRef = useRef<number>(0);
+    const userLocationRef = useRef<[number, number] | null>(null);
+
     const [isGenerating, setIsGenerating] = useState(false);
-    const currentRouteRef = useRef<RouteResult | null>(null);
     const [selectedPoi, setSelectedPoi] = useState<{ waypoint: RouteWaypoint; stopNumber?: number } | null>(null);
+    const [currentStepIndex, setCurrentStepIndex] = useState(0);
+    const [hasActiveRoute, setHasActiveRoute] = useState(false);
+    const currentRouteRef = useRef<RouteResult | null>(null);
+
+    const updateUserMarker = useCallback((lngLat: [number, number], heading?: number | null) => {
+      const map = mapRef.current;
+      if (!map) return;
+
+      if (heading !== null && heading !== undefined && !Number.isNaN(heading)) {
+        headingRef.current = heading;
+      }
+
+      userLocationRef.current = lngLat;
+
+      const pos = { lat: lngLat[1], lng: lngLat[0] };
+      if (!userMarkerRef.current) {
+        userMarkerRef.current = new google.maps.Marker({
+          position: pos,
+          map,
+          icon: createUserLocationIcon(headingRef.current),
+          zIndex: 999,
+          title: 'Ваше місцезнаходження',
+        });
+      } else {
+        userMarkerRef.current.setPosition(pos);
+        userMarkerRef.current.setIcon(createUserLocationIcon(headingRef.current));
+      }
+    }, []);
+
+    const updateRouteProgress = useCallback((userLngLat: [number, number]) => {
+      const route = currentRouteRef.current;
+      if (!route?.points.length) return;
+
+      const idx = findClosestPointIndex(route.points, userLngLat);
+      const toLatLng = (p: [number, number]) => ({ lat: p[0], lng: p[1] });
+
+      const traveledPath = route.points.slice(0, idx + 1).map(toLatLng);
+      const remainingPath = route.points.slice(idx).map(toLatLng);
+
+      traveledLineRef.current?.setPath(traveledPath);
+      remainingLineRef.current?.setPath(remainingPath);
+
+      if (route.steps?.length) {
+        const stepIdx = findCurrentStepIndex(
+          route.steps,
+          [userLngLat[1], userLngLat[0]],
+          idx,
+          route.points.length
+        );
+        setCurrentStepIndex(stepIdx);
+      }
+    }, []);
+
+    const startLocationTracking = useCallback(() => {
+      if (!navigator.geolocation) return;
+
+      if (watchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+      }
+
+      watchIdRef.current = navigator.geolocation.watchPosition(
+        (pos) => {
+          const lngLat: [number, number] = [pos.coords.longitude, pos.coords.latitude];
+          const heading = pos.coords.heading;
+          updateUserMarker(lngLat, heading);
+          if (currentRouteRef.current) {
+            updateRouteProgress(lngLat);
+          }
+        },
+        () => {},
+        { enableHighAccuracy: true, maximumAge: 2000, timeout: 15000 }
+      );
+    }, [updateUserMarker, updateRouteProgress]);
 
     useEffect(() => {
       if (!mapContainerRef.current || !window.google) return;
+
       const map = new google.maps.Map(mapContainerRef.current, {
         center: { lat: 50.4501, lng: 30.5234 },
         zoom: 13,
         disableDefaultUI: true,
         zoomControl: true,
         clickableIcons: false,
+        rotateControl: true,
       });
       mapRef.current = map;
 
       navigator.geolocation.getCurrentPosition((pos) => {
         const loc: [number, number] = [pos.coords.longitude, pos.coords.latitude];
-        setUserLocation(loc);
+        updateUserMarker(loc, pos.coords.heading);
         map.setCenter({ lat: loc[1], lng: loc[0] });
       });
+
+      startLocationTracking();
+
+      const onOrientation = (event: DeviceOrientationEvent) => {
+        const compass = getCompassHeading(event);
+        if (compass !== null && userLocationRef.current) {
+          updateUserMarker(userLocationRef.current, compass);
+        }
+      };
+
+      window.addEventListener('deviceorientationabsolute', onOrientation as EventListener);
+      window.addEventListener('deviceorientation', onOrientation as EventListener);
+
+      return () => {
+        if (watchIdRef.current !== null) {
+          navigator.geolocation.clearWatch(watchIdRef.current);
+        }
+        window.removeEventListener('deviceorientationabsolute', onOrientation as EventListener);
+        window.removeEventListener('deviceorientation', onOrientation as EventListener);
+      };
+    }, [startLocationTracking, updateUserMarker]);
+
+    const clearRouteLines = useCallback(() => {
+      traveledLineRef.current?.setMap(null);
+      remainingLineRef.current?.setMap(null);
+      traveledLineRef.current = null;
+      remainingLineRef.current = null;
     }, []);
 
     const clearRouteAndMarkers = useCallback(() => {
-      if (routeLineRef.current) routeLineRef.current.setMap(null);
+      clearRouteLines();
       markersRef.current.forEach((m) => m.setMap(null));
       markersRef.current = [];
       setSelectedPoi(null);
-    }, []);
+      setCurrentStepIndex(0);
+      setHasActiveRoute(false);
+      currentRouteRef.current = null;
+    }, [clearRouteLines]);
 
     const displayRoute = useCallback((route: RouteResult) => {
       const map = mapRef.current;
       if (!map) return;
-      clearRouteAndMarkers();
+
+      markersRef.current.forEach((m) => m.setMap(null));
+      markersRef.current = [];
+      clearRouteLines();
+      setSelectedPoi(null);
+
+      currentRouteRef.current = route;
+      setHasActiveRoute(true);
+      setCurrentStepIndex(0);
 
       const path = route.points.map(p => ({ lat: p[0], lng: p[1] }));
 
-      routeLineRef.current = new google.maps.Polyline({
+      traveledLineRef.current = new google.maps.Polyline({
+        path: path.length > 0 ? [path[0]] : [],
+        strokeColor: '#28a745',
+        strokeOpacity: 0.35,
+        strokeWeight: 6,
+        map,
+        zIndex: 1,
+      });
+
+      remainingLineRef.current = new google.maps.Polyline({
         path,
         strokeColor: '#28a745',
-        strokeOpacity: 0.85,
-        strokeWeight: 5,
+        strokeOpacity: 0.95,
+        strokeWeight: 6,
         map,
-        icons: [{
-          icon: {
-            path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
-            scale: 3,
-            strokeColor: '#1b5e20',
-            fillColor: '#1b5e20',
-            fillOpacity: 1,
-          },
-          offset: '0',
-          repeat: '70px',
-        }],
+        zIndex: 2,
       });
 
       const bounds = new google.maps.LatLngBounds();
       path.forEach(p => bounds.extend(p));
+      if (userLocationRef.current) {
+        bounds.extend({ lat: userLocationRef.current[1], lng: userLocationRef.current[0] });
+      }
       map.fitBounds(bounds);
 
       route.waypoints.forEach((wp, index) => {
         const color = TYPE_COLOR_MAP[wp.type] || TYPE_COLOR_MAP["custom"];
-        const emoji = TYPE_EMOJI[wp.type] || "📍";
         const isDestination = wp.type === 'custom' && index === route.waypoints.length - 1;
 
         const marker = new google.maps.Marker({
@@ -168,17 +307,19 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
         markersRef.current.push(marker);
       });
 
+      if (userLocationRef.current) {
+        updateRouteProgress(userLocationRef.current);
+      }
+
       const summary = `${route.distanceKm} км · ~${route.estimatedTimeMinutes} хв${route.difficulty ? ` · ${route.difficulty}` : ''}`;
       onRouteSummary?.(summary);
-    }, [clearRouteAndMarkers, onRouteSummary]);
+    }, [clearRouteLines, onRouteSummary, updateRouteProgress]);
 
     const setDestinationMarker = useCallback((coords: [number, number]) => {
       const map = mapRef.current;
       if (!map) return;
 
-      if (destinationMarkerRef.current) {
-        destinationMarkerRef.current.setMap(null);
-      }
+      destinationMarkerRef.current?.setMap(null);
 
       destinationMarkerRef.current = new google.maps.Marker({
         position: { lat: coords[1], lng: coords[0] },
@@ -219,11 +360,10 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
     }, [pickDestinationMode, onDestinationPicked, setDestinationMarker]);
 
     const generateRoute = async (preferences: WalkPreferences) => {
-      if (!userLocation) return;
+      if (!userLocationRef.current) return;
       setIsGenerating(true);
       try {
-        const route = await generateRouteFromText(userLocation, preferences.prompt, { routeMode: preferences.routeMode });
-        currentRouteRef.current = route;
+        const route = await generateRouteFromText(userLocationRef.current, preferences.prompt, { routeMode: preferences.routeMode });
         displayRoute(route);
         onRouteGenerated?.({ ...route, prompt: preferences.prompt });
       } finally {
@@ -246,15 +386,22 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
       const routeResult: RouteResult = {
         points: route.points,
         waypoints: safeWaypoints,
+        steps: (route as any).steps,
         distanceKm: (route as any).statistics?.distanceKm || 0,
         estimatedTimeMinutes: (route as any).statistics?.estimatedTimeMinutes || 0,
         locations: (route as any).locations || [],
         difficulty: (route as any).difficulty
       };
 
-      currentRouteRef.current = routeResult;
       displayRoute(routeResult);
     };
+
+    const centerOnUser = useCallback(() => {
+      if (userLocationRef.current && mapRef.current) {
+        mapRef.current.panTo({ lat: userLocationRef.current[1], lng: userLocationRef.current[0] });
+        mapRef.current.setZoom(17);
+      }
+    }, []);
 
     useImperativeHandle(ref, () => ({
       generateRoute,
@@ -262,13 +409,15 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
       requestGeolocation: () => {
         navigator.geolocation.getCurrentPosition((pos) => {
           const loc: [number, number] = [pos.coords.longitude, pos.coords.latitude];
-          setUserLocation(loc);
+          updateUserMarker(loc, pos.coords.heading);
           mapRef.current?.setCenter({ lat: loc[1], lng: loc[0] });
         });
+        startLocationTracking();
       },
       getCurrentRoute: () => currentRouteRef.current,
       clearCurrentRoute: clearRouteAndMarkers,
-      isGenerating
+      centerOnUser,
+      isGenerating,
     }));
 
     return (
@@ -276,15 +425,44 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
         <div ref={mapContainerRef} style={{ width: "100%", height: "100%", position: "absolute" }} />
 
         {pickDestinationMode && (
-          <div
-            className="position-absolute top-0 start-50 translate-middle-x mt-3 px-3 py-2 bg-warning text-dark rounded-pill shadow small fw-semibold"
-            style={{ zIndex: 1100 }}
-          >
-            <i className="bi bi-crosshair me-1"></i> Клікніть на карті, щоб вказати кінець маршруту
-          </div>
+          <>
+            <div
+              className="position-absolute top-0 start-50 translate-middle-x mt-3 px-3 py-2 bg-warning text-dark rounded-pill shadow small fw-semibold"
+              style={{ zIndex: 1100, maxWidth: '90%', textAlign: 'center' }}
+            >
+              <i className="bi bi-crosshair me-1"></i> Торкніться карти — кінець маршруту
+            </div>
+            {onPickCancel && (
+              <button
+                type="button"
+                className="btn btn-light btn-sm rounded-pill shadow home-pick-cancel"
+                onClick={onPickCancel}
+              >
+                <i className="bi bi-x-lg me-1"></i> Скасувати
+              </button>
+            )}
+          </>
         )}
 
-        {selectedPoi && (
+        {!pickDestinationMode && hasActiveRoute && currentRouteRef.current?.steps && (
+          <NavigationStepsPanel
+            steps={currentRouteRef.current.steps}
+            currentStepIndex={currentStepIndex}
+            onStepClick={setCurrentStepIndex}
+          />
+        )}
+
+        <button
+          type="button"
+          className="home-locate-btn"
+          onClick={centerOnUser}
+          title="Моє місцезнаходження"
+          aria-label="Центрувати на мені"
+        >
+          <i className="bi bi-crosshair"></i>
+        </button>
+
+        {selectedPoi && !pickDestinationMode && (
           <PlaceInfoCard
             waypoint={selectedPoi.waypoint}
             stopNumber={selectedPoi.stopNumber}

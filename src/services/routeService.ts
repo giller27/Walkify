@@ -5,6 +5,7 @@ import {
   getDistanceKm, timeToDistanceKm,
 } from './waypointOptimizer';
 import { geocodeAddress } from './placesService';
+import { stripHtml } from '../utils/routeTracking';
 import { calculateElevationProfile, getTerrainInfo, calculateRouteDifficulty } from './routeOptions';
 import type { RouteDifficulty, ElevationProfile } from '../types/routeEnhancements';
 
@@ -40,9 +41,18 @@ export interface RouteWaypoint {
   externalId?: string;
 }
 
+export interface RouteStep {
+  instruction: string;
+  distanceMeters: number;
+  durationSeconds: number;
+  endLocation: [number, number]; // [lat, lng]
+  maneuver?: string;
+}
+
 export interface RouteResult {
   points: [number, number][]; // [lat, lng]
   waypoints: RouteWaypoint[];
+  steps?: RouteStep[];
   distanceKm: number;
   estimatedTimeMinutes: number;
   locations: string[];
@@ -156,6 +166,18 @@ function placeKey(place: Place): string {
   return place.externalId || `${place.name}_${place.coordinates[0].toFixed(3)}`;
 }
 
+function uniqueCategories(categories: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const cat of categories) {
+    if (!seen.has(cat)) {
+      seen.add(cat);
+      result.push(cat);
+    }
+  }
+  return result;
+}
+
 async function findSequentialWaypoints(
   startLocation: [number, number],
   options: {
@@ -165,8 +187,10 @@ async function findSequentialWaypoints(
     endLocation?: [number, number];
   }
 ): Promise<Place[]> {
-  const { categories, targetTimeMinutes, routeMode, endLocation } = options;
-  const searchCategories = categories.length > 0 ? categories : ['park', 'cafe', 'tourist_attraction'];
+  const { targetTimeMinutes, routeMode, endLocation } = options;
+  const searchCategories = uniqueCategories(
+    options.categories.length > 0 ? options.categories : ['park', 'cafe', 'tourist_attraction']
+  );
   const maxAllowedKm = timeToDistanceKm(targetTimeMinutes) * 1.15;
   const isCircular = routeMode === 'exploration';
   const finalEnd = endLocation ?? startLocation;
@@ -175,15 +199,10 @@ async function findSequentialWaypoints(
   const visited = new Set<string>();
   let current = startLocation;
   let totalDistKm = 0;
-  let categoryIndex = 0;
-  const MAX_STOPS = 20;
 
-  while (selected.length < MAX_STOPS && totalDistKm < maxAllowedKm) {
+  for (const targetCategory of searchCategories) {
     const remainingBudgetKm = maxAllowedKm - totalDistKm;
     if (remainingBudgetKm < 0.15) break;
-
-    const targetCategory = searchCategories[categoryIndex % searchCategories.length];
-    categoryIndex++;
 
     const searchRadiusM = Math.max(
       400,
@@ -218,11 +237,7 @@ async function findSequentialWaypoints(
         ? getDistanceKm(candidate.coordinates, startLocation)
         : getDistanceKm(candidate.coordinates, finalEnd);
 
-      const fitsBudget = isCircular
-        ? totalDistKm + legKm + returnKm <= maxAllowedKm
-        : totalDistKm + legKm + returnKm <= maxAllowedKm;
-
-      if (fitsBudget) {
+      if (totalDistKm + legKm + returnKm <= maxAllowedKm) {
         picked = candidate;
         break;
       }
@@ -257,47 +272,15 @@ function placesToWaypoints(places: Place[]): RouteWaypoint[] {
   });
 }
 
-async function buildRouteWithTimeFill(
+async function buildFinalRoute(
   userLocation: [number, number],
-  options: RouteFilterOptions,
   endCoord: [number, number],
-  initialPois: Place[]
+  pois: Place[]
 ): Promise<RouteResult> {
-  const minTimeMinutes = options.targetTimeMinutes * 0.85;
-  let pois = [...initialPois];
-  let route: RouteResult | null = null;
-  let attempts = 0;
-
-  while (attempts < 6) {
-    const waypointCoords = options.routeMode === 'exploration'
-      ? pois.map(p => p.coordinates)
-      : pois.map(p => p.coordinates);
-
-    route = await buildRoute(userLocation, endCoord, waypointCoords);
-    route.waypoints = placesToWaypoints(pois);
-    route.locations = pois.map(wp => wp.name);
-
-    if (route.estimatedTimeMinutes >= minTimeMinutes || pois.length >= 20) break;
-
-    const extra = await findSequentialWaypoints(
-      pois.length > 0 ? pois[pois.length - 1].coordinates : userLocation,
-      {
-        categories: options.categories,
-        targetTimeMinutes: options.targetTimeMinutes - route.estimatedTimeMinutes,
-        routeMode: options.routeMode,
-        endLocation: endCoord,
-      }
-    );
-
-    const existingKeys = new Set(pois.map(placeKey));
-    const newOnes = extra.filter(p => !existingKeys.has(placeKey(p)));
-    if (newOnes.length === 0) break;
-
-    pois = [...pois, ...newOnes];
-    attempts++;
-  }
-
-  return route!;
+  const route = await buildRoute(userLocation, endCoord, pois.map(p => p.coordinates));
+  route.waypoints = placesToWaypoints(pois);
+  route.locations = pois.map(wp => wp.name);
+  return route;
 }
 
 // ─── Новий метод: Генерація за фільтрами ────────────────────────────────────────
@@ -387,12 +370,7 @@ export async function generateRouteByFilters(
     return directRoute;
   }
 
-  const route = await buildRouteWithTimeFill(
-    userLocation,
-    options,
-    endCoord,
-    sequencedPois
-  );
+  const route = await buildFinalRoute(userLocation, endCoord, sequencedPois);
 
   if (destinationPlace) {
     route.waypoints.push({
@@ -484,11 +462,22 @@ export async function buildRoute(
         let totalDistanceMeters = 0;
         let totalDurationSeconds = 0;
         const points: [number, number][] = [];
+        const steps: RouteStep[] = [];
 
         route.legs.forEach((l: google.maps.DirectionsLeg) => {
           totalDistanceMeters += l.distance?.value || 0;
           totalDurationSeconds += l.duration?.value || 0;
           l.steps.forEach((step: google.maps.DirectionsStep) => {
+            steps.push({
+              instruction: stripHtml(step.instructions || ''),
+              distanceMeters: step.distance?.value || 0,
+              durationSeconds: step.duration?.value || 0,
+              endLocation: [
+                step.end_location.lat(),
+                step.end_location.lng(),
+              ],
+              maneuver: step.maneuver,
+            });
             step.path.forEach((latLng: google.maps.LatLng) => {
               points.push([latLng.lat(), latLng.lng()]);
             });
@@ -510,6 +499,7 @@ export async function buildRoute(
         resolve({
           points,
           waypoints: waypointsWithNames,
+          steps,
           distanceKm,
           estimatedTimeMinutes,
           locations: [],

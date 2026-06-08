@@ -7,7 +7,6 @@ interface WalkFiltersMenuProps {
   destination?: RouteDestination | null;
   onDestinationChange?: (dest: RouteDestination | null) => void;
   onPickOnMap?: () => void;
-  isPickingOnMap?: boolean;
 }
 
 const AVAILABLE_CATEGORIES = [
@@ -38,7 +37,6 @@ const WalkFiltersMenu: React.FC<WalkFiltersMenuProps> = ({
   destination,
   onDestinationChange,
   onPickOnMap,
-  isPickingOnMap,
 }) => {
   const [routeMode, setRouteMode] = useState<"exploration" | "point_to_point">("exploration");
   const [selectedCategories, setSelectedCategories] = useState<string[]>(["park", "cafe"]);
@@ -142,11 +140,11 @@ const WalkFiltersMenu: React.FC<WalkFiltersMenuProps> = ({
             />
             <button
               type="button"
-              className={`btn w-100 rounded-3 py-2 ${isPickingOnMap ? "btn-warning" : "btn-outline-success"}`}
+              className="btn btn-outline-success w-100 rounded-3 py-2"
               onClick={onPickOnMap}
             >
-              <i className="bi bi-crosshair me-2"></i>
-              {isPickingOnMap ? "Клікніть на карті..." : "Обрати точку на карті"}
+              <i className="bi bi-fullscreen me-2"></i>
+              Обрати точку на карті
             </button>
             {destination?.coords && destination.address && (
               <div className="alert alert-success-subtle border-0 rounded-3 small mt-2 mb-0 py-2">
@@ -161,7 +159,9 @@ const WalkFiltersMenu: React.FC<WalkFiltersMenuProps> = ({
           <label className="form-label small fw-bold text-secondary text-uppercase mb-2">
             Що хочеться відвідати?
           </label>
-          <p className="text-muted small mb-2">Кожна зупинка — одна з обраних категорій по черзі</p>
+          <p className="text-muted small mb-2">
+            Одна зупинка на кожен обраний критерій (напр. кав&apos;ярня + пекарня + музей = 3 точки)
+          </p>
           <div className="d-flex flex-wrap gap-2">
             {AVAILABLE_CATEGORIES.map((cat) => {
               const isSelected = selectedCategories.includes(cat.id);
