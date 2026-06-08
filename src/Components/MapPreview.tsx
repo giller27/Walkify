@@ -1,8 +1,8 @@
+/// <reference types="google.maps" />
 import React, { useEffect, useRef } from "react";
-import { loadGoogleMaps } from "../services/googleMapsLoader";
 
 interface MapPreviewProps {
-  points?: [number, number][];
+  points?: [number, number][]; // Очікується [lat, lng]
   isPublic?: boolean;
   height?: number;
 }
@@ -13,97 +13,70 @@ const MapPreview: React.FC<MapPreviewProps> = ({
   height = 200,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<any>(null);
-  const routeLineRef = useRef<any>(null);
-  const markersRef = useRef<any[]>([]);
+  const mapRef = useRef<google.maps.Map | null>(null);
 
   useEffect(() => {
-    let disposed = false;
+    // Якщо немає контейнера, мало точок, або Google API ще не завантажився
+    if (!containerRef.current || !points || points.length < 2 || !window.google) {
+      return;
+    }
 
-    const clearMapOverlays = () => {
-      routeLineRef.current?.setMap(null);
-      routeLineRef.current = null;
-      markersRef.current.forEach((marker) => marker.setMap(null));
-      markersRef.current = [];
-    };
+    const path = points.map((p) => ({ lat: p[0], lng: p[1] }));
 
-    const renderPreview = async () => {
-      if (!containerRef.current || !points || points.length < 2) {
-        return;
-      }
+    // Створюємо нову карту
+    const map = new google.maps.Map(containerRef.current, {
+      center: path[0],
+      zoom: 13,
+      disableDefaultUI: true, // Прибираємо зайві кнопки для прев'ю
+      gestureHandling: "none", // Робимо карту неінтерактивною (як було раніше)
+      mapId: "DEMO_MAP_ID",
+    });
 
-      try {
-        const maps = await loadGoogleMaps();
-        if (disposed || !containerRef.current) return;
+    mapRef.current = map;
 
-        const path = points.map(([lat, lng]) => ({ lat, lng }));
-        const map =
-          mapRef.current ||
-          new maps.Map(containerRef.current, {
-            center: path[0],
-            zoom: 13,
-            disableDefaultUI: true,
-            draggable: false,
-            keyboardShortcuts: false,
-            scrollwheel: false,
-            clickableIcons: false,
-          });
+    // Додаємо лінію маршруту
+    new google.maps.Polyline({
+      path,
+      geodesic: true,
+      strokeColor: isPublic ? "#28a745" : "#6c757d",
+      strokeOpacity: 0.8,
+      strokeWeight: 3,
+      map,
+    });
 
-        mapRef.current = map;
-        clearMapOverlays();
+    // Маркер на старті (зелений)
+    new google.maps.Marker({
+      position: path[0],
+      map,
+      icon: {
+        path: google.maps.SymbolPath.CIRCLE,
+        scale: 6,
+        fillColor: "#28a745",
+        fillOpacity: 1,
+        strokeWeight: 2,
+        strokeColor: "#ffffff",
+      },
+    });
 
-        routeLineRef.current = new maps.Polyline({
-          map,
-          path,
-          strokeColor: isPublic ? "#28a745" : "#6c757d",
-          strokeOpacity: 0.85,
-          strokeWeight: 4,
-        });
+    // Маркер на фініші (червоний)
+    new google.maps.Marker({
+      position: path[path.length - 1],
+      map,
+      icon: {
+        path: google.maps.SymbolPath.CIRCLE,
+        scale: 6,
+        fillColor: "#dc3545",
+        fillOpacity: 1,
+        strokeWeight: 2,
+        strokeColor: "#ffffff",
+      },
+    });
 
-        markersRef.current.push(
-          new maps.Marker({
-            map,
-            position: path[0],
-            title: "Початок маршруту",
-            icon: {
-              path: maps.SymbolPath.CIRCLE,
-              scale: 6,
-              fillColor: "#28a745",
-              fillOpacity: 1,
-              strokeColor: "#ffffff",
-              strokeWeight: 2,
-            },
-          }),
-          new maps.Marker({
-            map,
-            position: path[path.length - 1],
-            title: "Кінець маршруту",
-            icon: {
-              path: maps.SymbolPath.CIRCLE,
-              scale: 6,
-              fillColor: "#dc3545",
-              fillOpacity: 1,
-              strokeColor: "#ffffff",
-              strokeWeight: 2,
-            },
-          })
-        );
+    // Вписуємо карту в межі точок маршруту
+    const bounds = new google.maps.LatLngBounds();
+    path.forEach((p) => bounds.extend(p));
+    map.fitBounds(bounds);
 
-        const bounds = new maps.LatLngBounds();
-        path.forEach((point) => bounds.extend(point));
-        map.fitBounds(bounds, 10);
-      } catch (error) {
-        console.error("Помилка превʼю Google Maps:", error);
-      }
-    };
-
-    renderPreview();
-
-    return () => {
-      disposed = true;
-      clearMapOverlays();
-      mapRef.current = null;
-    };
   }, [points, isPublic]);
 
   if (!points || points.length < 2) {
