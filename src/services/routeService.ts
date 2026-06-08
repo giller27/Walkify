@@ -1,8 +1,7 @@
 /// <reference types="google.maps" />
 
 import {
-  selectBestWaypoints, sequenceWaypoints,
-  getDistanceKm, timeToDistanceKm,
+  getDistanceKm, timeToDistanceKm, scorePlaceOnPath, pickBestRatedPlace,
 } from './waypointOptimizer';
 import { geocodeAddress } from './placesService';
 import { stripHtml } from '../utils/routeTracking';
@@ -79,18 +78,47 @@ const EXTENDED_POI_TYPES = [
   'tourist_attraction', 'point_of_interest', 'church', 'natural_feature'
 ];
 
-const PLACE_TYPE_MAPPING: Record<string, string> = {
+export const PLACE_TYPE_MAPPING: Record<string, string> = {
   'парк': 'park',
+  'парки': 'park',
   'кав\'ярня': 'cafe',
+  'кав\'ярні': 'cafe',
   'кафе': 'cafe',
   'ресторан': 'restaurant',
-  'магазин': 'store',
+  'ресторани': 'restaurant',
+  'пекарня': 'bakery',
+  'пекарні': 'bakery',
   'музей': 'museum',
+  'музеї': 'museum',
+  'галерея': 'art_gallery',
+  'галереї': 'art_gallery',
   'бібліотека': 'library',
+  'бібліотеки': 'library',
+  'книгарня': 'book_store',
+  'книгарні': 'book_store',
   'церква': 'church',
+  'храм': 'church',
+  'храми': 'church',
+  'визначне місце': 'tourist_attraction',
+  'визначні місця': 'tourist_attraction',
+  'пам\'ятка': 'tourist_attraction',
+  'магазин': 'store',
+  'магазини': 'store',
+  'торговий центр': 'shopping_mall',
+  'тц': 'shopping_mall',
+  'спортзал': 'gym',
+  'зал': 'gym',
+  'спа': 'spa',
+  'зоопарк': 'zoo',
+  'стадіон': 'stadium',
+  'кінотеатр': 'movie_theater',
+  'бар': 'night_club',
+  'клуб': 'night_club',
+  'майданчик': 'playground',
   'пляж': 'natural_feature',
   'озеро': 'natural_feature',
   'річка': 'natural_feature',
+  'природа': 'natural_feature',
 };
 
 // ─── Google Maps API Wrappers ───────────────────────────────────────────────────
@@ -221,27 +249,24 @@ async function findSequentialWaypoints(
 
     if (candidates.length === 0) continue;
 
-    candidates.sort((a, b) => {
-      const distA = getDistanceKm(current, a.coordinates);
-      const distB = getDistanceKm(current, b.coordinates);
-      if (Math.abs(distA - distB) < 0.05) {
-        return (b.rating || 0) - (a.rating || 0);
-      }
-      return distA - distB;
-    });
+    const maxDistInBatch = Math.max(
+      ...candidates.map(c => getDistanceKm(current, c.coordinates)),
+      0.1
+    );
 
-    let picked: Place | null = null;
-    for (const candidate of candidates) {
+    const feasible = candidates.filter(candidate => {
       const legKm = getDistanceKm(current, candidate.coordinates);
       const returnKm = isCircular
         ? getDistanceKm(candidate.coordinates, startLocation)
         : getDistanceKm(candidate.coordinates, finalEnd);
+      return totalDistKm + legKm + returnKm <= maxAllowedKm;
+    });
 
-      if (totalDistKm + legKm + returnKm <= maxAllowedKm) {
-        picked = candidate;
-        break;
-      }
-    }
+    const picked = feasible.length > 0
+      ? feasible.sort((a, b) =>
+          scorePlaceOnPath(b, current, maxDistInBatch) - scorePlaceOnPath(a, current, maxDistInBatch)
+        )[0]
+      : null;
 
     if (!picked) continue;
 
@@ -531,107 +556,187 @@ export async function generateExplorationRoute(
   });
 }
 
+export interface ParsedRouteRequest {
+  destinationType: string | null;
+  destinationName: string | null;
+  categories: string[];
+  waypointTypes: string[];
+  waypointNames: string[];
+  targetTimeMinutes: number;
+  isExplorationMode: boolean;
+  isPointToPoint: boolean;
+}
+
+function extractCategoriesInOrder(text: string): string[] {
+  const lowerText = text.toLowerCase();
+  const keys = Object.keys(PLACE_TYPE_MAPPING).sort((a, b) => b.length - a.length);
+  const found: { index: number; type: string }[] = [];
+
+  for (const key of keys) {
+    let idx = lowerText.indexOf(key);
+    while (idx !== -1) {
+      found.push({ index: idx, type: PLACE_TYPE_MAPPING[key] });
+      idx = lowerText.indexOf(key, idx + 1);
+    }
+  }
+
+  const seen = new Set<string>();
+  return found
+    .sort((a, b) => a.index - b.index)
+    .filter(f => {
+      if (seen.has(f.type)) return false;
+      seen.add(f.type);
+      return true;
+    })
+    .map(f => f.type);
+}
+
+export function parseRouteRequest(text: string): ParsedRouteRequest {
+  const lowerText = text.toLowerCase().trim();
+  const categories = extractCategoriesInOrder(text);
+
+  let destinationName: string | null = null;
+  let destinationType: string | null = null;
+  const waypointNames: string[] = [];
+  const waypointTypes: string[] = [];
+
+  const destMatch = text.match(
+    /(?:до|в|на)\s+([А-Яа-яІіЇїЄєҐґA-Za-z0-9][А-Яа-яІіЇїЄєҐґA-Za-z0-9\s\-'']{2,}?)(?=\s+(?:через|з|із|за|і|та|,)|$)/i
+  );
+  if (destMatch?.[1]) {
+    const destText = destMatch[1].trim().toLowerCase();
+    const matchedType = Object.entries(PLACE_TYPE_MAPPING).find(([key]) => destText.includes(key));
+    if (matchedType) {
+      destinationType = matchedType[1];
+    } else {
+      destinationName = destMatch[1].trim();
+    }
+  }
+
+  const throughMatches = text.matchAll(
+    /через\s+([А-Яа-яІіЇїЄєҐґA-Za-z0-9][А-Яа-яІіЇїЄєҐґA-Za-z0-9\s\-'']*)/gi
+  );
+  for (const match of throughMatches) {
+    const segment = match[1].trim().toLowerCase();
+    const typeEntry = Object.entries(PLACE_TYPE_MAPPING).find(([key]) => segment.includes(key));
+    if (typeEntry) {
+      waypointTypes.push(typeEntry[1]);
+    } else if (segment.length >= 3) {
+      waypointNames.push(match[1].trim());
+    }
+  }
+
+  const withMatches = text.matchAll(
+    /(?:з|із)\s+([а-яіїєґa-z][а-яіїєґa-z\s\-'']+)/gi
+  );
+  for (const match of withMatches) {
+    const segment = match[1].trim().toLowerCase();
+    const typeEntry = Object.entries(PLACE_TYPE_MAPPING).find(([key]) => segment.includes(key));
+    if (typeEntry) waypointTypes.push(typeEntry[1]);
+  }
+
+  const isExplorationMode =
+    /\b(прогулянка|прогулятись|прогулятися|кільцев|коло|по місту)\b/i.test(lowerText);
+  const isPointToPoint =
+    /\b(до точки|прямий|прямо)\b/i.test(lowerText) ||
+    (!!destinationName && !isExplorationMode);
+
+  let targetTimeMinutes = 60;
+  const hourMatch = lowerText.match(/(\d+)\s*(год|годин|години|h\b)/i);
+  const minMatch = lowerText.match(/(\d+)\s*(хв|хвилин|хвилини|min)/i);
+  if (hourMatch?.[1]) {
+    targetTimeMinutes = Math.max(15, Math.min(parseInt(hourMatch[1]) * 60, 240));
+    if (minMatch?.[1]) {
+      targetTimeMinutes += parseInt(minMatch[1]);
+    }
+  } else if (minMatch?.[1]) {
+    targetTimeMinutes = Math.max(15, Math.min(parseInt(minMatch[1]), 240));
+  }
+
+  const allCategories = uniqueCategories([
+    ...categories,
+    ...waypointTypes,
+    ...(destinationType ? [destinationType] : []),
+  ]);
+
+  return {
+    destinationType,
+    destinationName,
+    categories: allCategories,
+    waypointTypes: uniqueCategories(waypointTypes),
+    waypointNames,
+    targetTimeMinutes,
+    isExplorationMode: isExplorationMode || (!isPointToPoint && !destinationName),
+    isPointToPoint,
+  };
+}
+
 export async function generateRouteFromText(
   userLocation: [number, number],
   text: string,
   options?: { routeMode?: "point_to_point" | "exploration" }
 ): Promise<RouteResult> {
   const parsed = parseRouteRequest(text);
-  const forceExploration = options?.routeMode === "exploration";
-  const forcePointToPoint = options?.routeMode === "point_to_point";
+  const routeMode = options?.routeMode
+    ?? (parsed.isExplorationMode ? 'exploration' : parsed.isPointToPoint ? 'point_to_point' : 'exploration');
 
-  if (!forcePointToPoint && (parsed.isExplorationMode || forceExploration)) {
-    const allTypes = [...new Set([...parsed.waypointTypes, parsed.destinationType].filter(Boolean) as string[])];
-    return generateExplorationRoute(userLocation, {
-      types: allTypes,
-      targetTimeMinutes: parsed.targetTimeMinutes ?? 60,
+  const visitCategories = uniqueCategories(
+    parsed.categories.filter(c => c !== parsed.destinationType || routeMode === 'exploration')
+  );
+
+  if (routeMode === 'exploration') {
+    if (visitCategories.length === 0) {
+      throw new Error('Вкажіть, що хочете відвідати (парк, кав\'ярня, музей тощо).');
+    }
+    return generateRouteByFilters(userLocation, {
+      routeMode: 'exploration',
+      categories: visitCategories,
+      targetTimeMinutes: parsed.targetTimeMinutes,
     });
   }
 
   let destination: Place | null = null;
+
   if (parsed.destinationName) {
     destination = await findPlaceByName(parsed.destinationName, userLocation);
   } else if (parsed.destinationType) {
-    const pois = await searchComprehensivePois(userLocation, [parsed.destinationType], 5000);
-    if (pois.length > 0) destination = pois[0];
+    const pois = await findPlacesByGoogleType(userLocation, parsed.destinationType, 5000);
+    destination = pickBestRatedPlace(pois, userLocation);
   }
 
   if (!destination) {
-    throw new Error('Не вдалося визначити пункт призначення. Спробуйте уточнити запит.');
+    throw new Error('Не вдалося знайти пункт призначення. Уточніть адресу або назву місця.');
   }
 
-  let waypointPlaces: Place[] = [];
+  const namedWaypoints: Place[] = [];
   for (const wName of parsed.waypointNames) {
     const wp = await findPlaceByName(wName, userLocation);
-    if (wp) waypointPlaces.push(wp);
+    if (wp) namedWaypoints.push(wp);
   }
 
-  if (parsed.waypointTypes.length > 0) {
-    const extraPois = await searchComprehensivePois(userLocation, parsed.waypointTypes, 3000);
-    waypointPlaces = [...waypointPlaces, ...selectBestWaypoints(extraPois, 2, userLocation, destination.coordinates)];
-  }
+  const categoryWaypoints = visitCategories.length > 0
+    ? await findSequentialWaypoints(userLocation, {
+        categories: visitCategories,
+        targetTimeMinutes: parsed.targetTimeMinutes,
+        routeMode: 'point_to_point',
+        endLocation: destination.coordinates,
+      })
+    : [];
 
-  const sequencedWaypoints = sequenceWaypoints(waypointPlaces, userLocation, destination.coordinates);
-  const wayCoords: [number, number][] = sequencedWaypoints.map(w => w.coordinates);
+  const allWaypoints = [...namedWaypoints, ...categoryWaypoints];
+  const route = await buildFinalRoute(userLocation, destination.coordinates, allWaypoints);
 
-  const route = await buildRoute(userLocation, destination.coordinates, wayCoords);
-
-  route.locations = [destination.name, ...sequencedWaypoints.map(wp => wp.name)];
-  route.waypoints = sequencedWaypoints.map(wp => ({
-    location: [wp.coordinates[1], wp.coordinates[0]] as [number, number],
-    name: wp.name,
-    type: wp.type as PoiCategory,
-  }));
+  route.waypoints.push({
+    location: [destination.coordinates[1], destination.coordinates[0]],
+    name: destination.name,
+    type: (destination.type || 'custom') as PoiCategory,
+    address: destination.address,
+    rating: destination.rating,
+    userRatingsTotal: destination.userRatingsTotal,
+    externalId: destination.externalId,
+    source: destination.source ?? 'google',
+  });
+  route.locations.push(destination.name);
 
   return route;
-}
-
-export function parseRouteRequest(text: string): {
-  destinationType: string | null;
-  destinationName: string | null;
-  waypointTypes: string[];
-  waypointNames: string[];
-  targetTimeMinutes?: number;
-  isExplorationMode?: boolean;
-} {
-  const lowerText = text.toLowerCase();
-  let destinationType: string | null = null;
-  let destinationName: string | null = null;
-  const waypointTypes: string[] = [];
-  const waypointNames: string[] = [];
-
-  const containsBaseForm = (txt: string, baseForm: string): boolean => {
-    return txt.includes(baseForm.toLowerCase());
-  };
-
-  const specificNamePatterns = [
-    /до\s+([А-Яа-яІіЇїЄєҐґA-Za-z0-9\s]{3,})/i,
-    /через\s+([А-Яа-яІіЇїЄєҐґA-Za-z0-9\s]{3,})/i
-  ];
-
-  for (const pattern of specificNamePatterns) {
-    const match = text.match(pattern);
-    if (match && match[1]) {
-      const name = match[1].trim();
-      if (!destinationName) destinationName = name;
-      else waypointNames.push(name);
-    }
-  }
-
-  for (const [key, value] of Object.entries(PLACE_TYPE_MAPPING)) {
-    if (containsBaseForm(lowerText, key)) {
-      if (!destinationType) destinationType = value;
-      else waypointTypes.push(value);
-    }
-  }
-
-  const isExplorationMode = lowerText.includes('прогулянка') || lowerText.includes('прогулятись');
-
-  let targetTimeMinutes: number | undefined;
-  const timeMatch = text.match(/(\d+)\s*(хв|хвилин|min)/i);
-  if (timeMatch?.[1]) {
-    targetTimeMinutes = Math.max(15, Math.min(parseInt(timeMatch[1]), 240));
-  }
-
-  return { destinationType, destinationName, waypointTypes, waypointNames, isExplorationMode, targetTimeMinutes };
 }

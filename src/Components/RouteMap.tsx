@@ -199,7 +199,7 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
         disableDefaultUI: true,
         zoomControl: true,
         clickableIcons: false,
-        rotateControl: true,
+        gestureHandling: 'greedy',
       });
       mapRef.current = map;
 

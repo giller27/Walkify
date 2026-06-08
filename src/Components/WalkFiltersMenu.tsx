@@ -160,7 +160,7 @@ const WalkFiltersMenu: React.FC<WalkFiltersMenuProps> = ({
             Що хочеться відвідати?
           </label>
           <p className="text-muted small mb-2">
-            Одна зупинка на кожен обраний критерій (напр. кав&apos;ярня + пекарня + музей = 3 точки)
+            Одна зупинка на критерій · пріоритет місцям з вищим рейтингом на шляху
           </p>
           <div className="d-flex flex-wrap gap-2">
             {AVAILABLE_CATEGORIES.map((cat) => {

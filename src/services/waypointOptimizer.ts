@@ -14,6 +14,29 @@ export function getDistanceKm(from: [number, number], to: [number, number]): num
   return getDistance(from[1], from[0], to[1], to[0]);
 }
 
+/** Оцінка місця: пріоритет рейтингу, відстань — другорядний фактор */
+export function scorePlaceOnPath(
+  place: Place,
+  from: [number, number],
+  maxDistKm: number
+): number {
+  const dist = getDistanceKm(from, place.coordinates);
+  const rating = place.rating ?? 3.0;
+  const reviews = Math.min((place.userRatingsTotal ?? 0) / 100, 1.5);
+  const ratingScore = rating * 3 + reviews;
+  const distNorm = maxDistKm > 0 ? dist / maxDistKm : 0;
+  return ratingScore - distNorm * 0.8;
+}
+
+export function pickBestRatedPlace(places: Place[], near?: [number, number]): Place | null {
+  if (places.length === 0) return null;
+  const origin = near ?? places[0].coordinates;
+  const maxDist = Math.max(...places.map(p => getDistanceKm(origin, p.coordinates)), 0.1);
+  return [...places].sort((a, b) =>
+    scorePlaceOnPath(b, origin, maxDist) - scorePlaceOnPath(a, origin, maxDist)
+  )[0];
+}
+
 function placeKey(place: Place): string {
   return place.externalId || `${place.name}_${place.coordinates[0].toFixed(3)}`;
 }

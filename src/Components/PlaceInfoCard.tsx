@@ -30,7 +30,7 @@ const PlaceInfoCard: React.FC<PlaceInfoCardProps> = ({ waypoint, stopNumber, onC
 
   return (
     <div
-      className="card shadow-lg border-0 rounded-4 overflow-hidden"
+      className="card shadow-lg border-0 rounded-4 overflow-hidden place-info-card"
       style={{ position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)', zIndex: 1300, width: 'min(380px, calc(100vw - 32px))' }}
     >
       {photoUrl && (

@@ -2,7 +2,7 @@ import React, { useState, useRef, useCallback } from "react";
 import RouteMap, { RouteMapRef } from "../Components/RouteMap";
 import WalkPreferences from "../Components/WalkPreferences";
 import WalkFiltersMenu from "../Components/WalkFiltersMenu";
-import { generateRouteByFilters, RouteFilterOptions, RouteDestination } from "../services/routeService";
+import { generateRouteByFilters, generateRouteFromText, RouteFilterOptions, RouteDestination } from "../services/routeService";
 import "../styles/home.css";
 
 const Home: React.FC = () => {
@@ -10,9 +10,26 @@ const Home: React.FC = () => {
   const [activeTab, setActiveTab] = useState<"filters" | "text">("filters");
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [routeSummary, setRouteSummary] = useState<string>("");
+  const [hasRoute, setHasRoute] = useState(false);
   const [destination, setDestination] = useState<RouteDestination | null>(null);
   const [isPickingOnMap, setIsPickingOnMap] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const loadRouteOnMap = useCallback((generatedRoute: Awaited<ReturnType<typeof generateRouteByFilters>>) => {
+    if (!mapRef.current) return;
+    (mapRef.current as any).loadSavedRoute({
+      points: generatedRoute.points,
+      statistics: {
+        distanceKm: generatedRoute.distanceKm,
+        estimatedTimeMinutes: generatedRoute.estimatedTimeMinutes,
+      },
+      waypoints: generatedRoute.waypoints,
+      steps: generatedRoute.steps,
+      locations: generatedRoute.locations,
+      difficulty: generatedRoute.difficulty,
+    });
+    setHasRoute(true);
+  }, []);
 
   const handlePickOnMap = useCallback(() => {
     setIsPickingOnMap(true);
@@ -30,6 +47,20 @@ const Home: React.FC = () => {
     setSidebarOpen(true);
   }, []);
 
+  const runWithGeolocation = (task: (userLoc: [number, number]) => Promise<void>) => {
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const userLoc: [number, number] = [position.coords.longitude, position.coords.latitude];
+        await task(userLoc);
+      },
+      () => {
+        alert("Будь ласка, увімкніть геолокацію в браузері.");
+        setIsGenerating(false);
+        setRouteSummary("");
+      }
+    );
+  };
+
   const handleFilterGeneration = async (filterOptions: RouteFilterOptions) => {
     if (!mapRef.current) return;
 
@@ -37,9 +68,7 @@ const Home: React.FC = () => {
     setSidebarOpen(false);
     setRouteSummary("Шукаємо місця та будуємо маршрут...");
 
-    navigator.geolocation.getCurrentPosition(async (position) => {
-      const userLoc: [number, number] = [position.coords.longitude, position.coords.latitude];
-
+    runWithGeolocation(async (userLoc) => {
       try {
         const options: RouteFilterOptions = {
           ...filterOptions,
@@ -49,36 +78,52 @@ const Home: React.FC = () => {
         };
 
         const generatedRoute = await generateRouteByFilters(userLoc, options);
+        loadRouteOnMap(generatedRoute);
 
-        if (mapRef.current) {
-          (mapRef.current as any).loadSavedRoute({
-            points: generatedRoute.points,
-            statistics: {
-              distanceKm: generatedRoute.distanceKm,
-              estimatedTimeMinutes: generatedRoute.estimatedTimeMinutes,
-            },
-            waypoints: generatedRoute.waypoints,
-            steps: generatedRoute.steps,
-            locations: generatedRoute.locations,
-            difficulty: generatedRoute.difficulty,
-          });
-
-          const diffStr = generatedRoute.difficulty ? ` · ${generatedRoute.difficulty}` : '';
-          setRouteSummary(
-            `${generatedRoute.distanceKm} км · ~${generatedRoute.estimatedTimeMinutes} хв (ціль: ${filterOptions.targetTimeMinutes} хв)${diffStr}`
-          );
-        }
+        const diffStr = generatedRoute.difficulty ? ` · ${generatedRoute.difficulty}` : '';
+        setRouteSummary(
+          `${generatedRoute.distanceKm} км · ~${generatedRoute.estimatedTimeMinutes} хв (ціль: ${filterOptions.targetTimeMinutes} хв)${diffStr}`
+        );
       } catch (err: any) {
         alert(err.message || "Помилка побудови маршруту.");
         setRouteSummary("");
       } finally {
         setIsGenerating(false);
       }
-    }, () => {
-      alert("Будь ласка, увімкніть геолокацію в браузері.");
-      setIsGenerating(false);
-      setRouteSummary("");
     });
+  };
+
+  const handleTextGeneration = async (prefs: { prompt: string; routeMode?: string; duration?: number }) => {
+    if (!mapRef.current) return;
+
+    setIsGenerating(true);
+    setSidebarOpen(false);
+    setRouteSummary("Аналізуємо запит...");
+
+    runWithGeolocation(async (userLoc) => {
+      try {
+        const generatedRoute = await generateRouteFromText(userLoc, prefs.prompt, {
+          routeMode: prefs.routeMode as "exploration" | "point_to_point" | undefined,
+        });
+        loadRouteOnMap(generatedRoute);
+
+        const diffStr = generatedRoute.difficulty ? ` · ${generatedRoute.difficulty}` : '';
+        setRouteSummary(
+          `${generatedRoute.distanceKm} км · ~${generatedRoute.estimatedTimeMinutes} хв${diffStr}`
+        );
+      } catch (err: any) {
+        alert(err.message || "Помилка побудови маршруту.");
+        setRouteSummary("");
+      } finally {
+        setIsGenerating(false);
+      }
+    });
+  };
+
+  const handleClearRoute = () => {
+    mapRef.current?.clearCurrentRoute();
+    setRouteSummary("");
+    setHasRoute(false);
   };
 
   return (
@@ -91,9 +136,9 @@ const Home: React.FC = () => {
 
       <div className="row g-0 h-100">
         <div
-          className={`col-12 col-md-4 p-3 bg-light border-end overflow-y-auto home-sidebar ${sidebarOpen ? 'open' : ''} ${isPickingOnMap ? 'd-none' : ''}`}
+          className={`col-12 col-md-4 p-2 p-md-3 bg-light border-end overflow-y-auto home-sidebar ${sidebarOpen ? 'open' : ''} ${isPickingOnMap ? 'd-none' : ''}`}
         >
-          <ul className="nav nav-pills nav-fill mb-3 bg-white p-1 rounded-3 border">
+          <ul className="nav nav-pills nav-fill mb-2 mb-md-3 bg-white p-1 rounded-3 border">
             <li className="nav-item">
               <button
                 className={`nav-link rounded-2 fw-semibold py-2 ${activeTab === "filters" ? "active bg-success text-white" : "text-secondary"}`}
@@ -122,21 +167,17 @@ const Home: React.FC = () => {
             />
           ) : (
             <WalkPreferences
-              onGenerate={(prefs: any) => {
-                setSidebarOpen(false);
-                mapRef.current?.generateRoute(prefs);
-              }}
+              onGenerate={handleTextGeneration}
               isGenerating={isGenerating}
               onRequestGeolocation={() => mapRef.current?.requestGeolocation()}
               routeSummary={routeSummary}
-              hasRoute={!!mapRef.current?.getCurrentRoute()}
-              onSaveRoute={() => console.log("Save clicked")}
-              onClearRoute={() => mapRef.current?.clearCurrentRoute()}
+              hasRoute={hasRoute}
+              onClearRoute={handleClearRoute}
             />
           )}
 
-          {routeSummary && (
-            <div className="alert alert-info mt-3 border-0 rounded-3 small shadow-sm">
+          {routeSummary && sidebarOpen && (
+            <div className="alert alert-info mt-2 mt-md-3 border-0 rounded-3 small shadow-sm mb-0">
               <i className="bi bi-info-circle me-2"></i> {routeSummary}
             </div>
           )}
@@ -154,9 +195,19 @@ const Home: React.FC = () => {
             </button>
           )}
 
+          {routeSummary && !sidebarOpen && !isPickingOnMap && (
+            <div className="home-route-chip">
+              <i className="bi bi-signpost-2 me-1 text-success"></i>
+              {routeSummary}
+            </div>
+          )}
+
           <RouteMap
             ref={mapRef}
-            onRouteSummary={(sum) => setRouteSummary(sum)}
+            onRouteSummary={(sum) => {
+              setRouteSummary(sum);
+              setHasRoute(true);
+            }}
             pickDestinationMode={isPickingOnMap}
             onDestinationPicked={handleDestinationPicked}
             onPickCancel={handlePickCancel}
