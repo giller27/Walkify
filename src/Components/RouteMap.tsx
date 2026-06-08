@@ -12,6 +12,8 @@ import {
 } from "../services/routeService";
 import type { SavedRoute } from "../services/supabaseService";
 import { loadGoogleMaps } from "../services/googleMapsLoader";
+import { getTerrainInfo } from "../services/routeOptions";
+import type { RouteOptions } from "../types/routeEnhancements";
 
 export interface WalkPreferences {
   prompt: string;
@@ -67,6 +69,7 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
     const [isGenerating, setIsGenerating] = useState(false);
     const currentRouteRef = useRef<RouteResult | null>(null);
     const [selectedPoi, setSelectedPoi] = useState<RouteWaypoint | null>(null);
+    const [advancedOptions, setAdvancedOptions] = useState<RouteOptions | null>(null);
 
     useEffect(() => {
       let disposed = false;
@@ -256,6 +259,8 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
         );
         currentRouteRef.current = route;
 
+        setAdvancedOptions(route.options ?? null);
+
         await displayRoute(route);
 
         const summary = `${route.distanceKm} км, ~${
@@ -441,6 +446,7 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
         clearMarkers();
         currentRouteRef.current = null;
         setSelectedPoi(null);
+        setAdvancedOptions(null);
       },
       isGenerating,
     }));
@@ -548,6 +554,21 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
                   )}
               </div>
             )}
+            {(() => {
+              const terrainInfo = getTerrainInfo(selectedPoi);
+              return (
+                <div
+                  style={{
+                    fontSize: "0.8rem",
+                    color: "#495057",
+                    marginBottom: 4,
+                  }}
+                >
+                  <i className="bi bi-shuffle me-1" />
+                  Тип поверхні: <span style={{ textTransform: "capitalize" }}>{terrainInfo.type}</span>
+                </div>
+              );
+            })()}
             {selectedPoi.description && (
               <div
                 style={{
@@ -568,6 +589,80 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
                 }}
               >
                 Джерело: {selectedPoi.source}
+              </div>
+            )}
+          </div>
+        )}
+        {advancedOptions && (
+          <div
+            style={{
+              position: "fixed",
+              left: 16,
+              bottom: panelExpanded ? 200 : 80,
+              zIndex: 1200,
+              backgroundColor: "#ffffff",
+              borderRadius: 12,
+              boxShadow: "0 4px 16px rgba(0,0,0,0.2)",
+              padding: 12,
+              maxWidth: 280,
+            }}
+          >
+            <div style={{ fontWeight: 600, fontSize: "0.95rem", marginBottom: 8 }}>
+              Параметри маршруту
+            </div>
+            <div
+              style={{
+                display: "flex",
+                gap: 8,
+                marginBottom: 8,
+                flexWrap: "wrap",
+              }}
+            >
+              <span
+                style={{
+                  padding: "4px 12px",
+                  borderRadius: 20,
+                  fontSize: "0.85rem",
+                  fontWeight: 500,
+                  backgroundColor:
+                    advancedOptions.difficulty === "Easy"
+                      ? "#d4edda"
+                      : advancedOptions.difficulty === "Moderate"
+                      ? "#fff3cd"
+                      : "#f8d7da",
+                  color:
+                    advancedOptions.difficulty === "Easy"
+                      ? "#155724"
+                      : advancedOptions.difficulty === "Moderate"
+                      ? "#856404"
+                      : "#721c24",
+                }}
+              >
+                {advancedOptions.difficulty}
+              </span>
+            </div>
+            {advancedOptions.elevationGain !== undefined && (
+              <div style={{ fontSize: "0.8rem", marginBottom: 4 }}>
+                <i className="bi bi-arrow-up me-1" />
+                Підйом: {advancedOptions.elevationGain}м
+              </div>
+            )}
+            {advancedOptions.avgGradient !== undefined && (
+              <div style={{ fontSize: "0.8rem", marginBottom: 4 }}>
+                <i className="bi bi-percent me-1" />
+                Середній градієнт: {advancedOptions.avgGradient}%
+              </div>
+            )}
+            {advancedOptions.scenicScore !== undefined && (
+              <div style={{ fontSize: "0.8rem", marginBottom: 4 }}>
+                <i className="bi bi-binoculars me-1" />
+                Панорамність: {(advancedOptions.scenicScore * 100).toFixed(0)}%
+              </div>
+            )}
+            {advancedOptions.terrainTypes && advancedOptions.terrainTypes.length > 0 && (
+              <div style={{ fontSize: "0.8rem" }}>
+                <i className="bi bi-shuffle me-1" />
+                Поверхні: {advancedOptions.terrainTypes.join(", ")}
               </div>
             )}
           </div>

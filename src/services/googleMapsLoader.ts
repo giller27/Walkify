@@ -49,6 +49,16 @@ export function loadGoogleMaps(libraries: string[] = ["places"]): Promise<any> {
       return;
     }
 
+    const validLibraries = ["places", "geometry", "drawing", "visualization"];
+    const uniqueLibraries = Array.from(
+      new Set(libraries.filter((lib) => validLibraries.includes(lib)))
+    );
+
+    const librariesParam =
+      uniqueLibraries.length > 0
+        ? `&libraries=${encodeURIComponent(uniqueLibraries.join(","))}`
+        : "";
+
     const script = document.createElement("script");
     script.id = GOOGLE_MAPS_SCRIPT_ID;
     script.async = true;
@@ -57,7 +67,7 @@ export function loadGoogleMaps(libraries: string[] = ["places"]): Promise<any> {
       `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(
         GOOGLE_MAPS_API_KEY
       )}` +
-      `&libraries=${encodeURIComponent(libraries.join(","))}` +
+      librariesParam +
       "&callback=initWalkifyGoogleMaps";
     script.onerror = () => reject(new Error("Failed to load Google Maps JavaScript API."));
 
