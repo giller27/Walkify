@@ -36,6 +36,7 @@ import {
   UserProfile as UserProfileType,
 } from "../services/supabaseService";
 import { supabase } from "../services/supabaseService";
+import { areUsersBlocked } from "../services/chatService";
 import "../styles/home.css";
 
 interface GoogleUser {
@@ -103,6 +104,7 @@ function NavigationContent() {
           const msg = payload.new as { sender_id: string; content: string };
           // Ignore messages sent by the current user
           if (!user || msg.sender_id === user.id) return;
+          if (await areUsersBlocked(user.id, msg.sender_id)) return;
 
           setHasUnreadMessages(true);
 

@@ -20,6 +20,10 @@ import {
   sendMessage,
   subscribeToMessages,
   unsubscribeFromChannel,
+  blockUser,
+  unblockUser,
+  isUserBlockedByMe,
+  areUsersBlocked,
   type ConversationWithOtherUser,
   type Message,
 } from "../services/chatService";
@@ -62,6 +66,9 @@ function Chat() {
   const [notificationPermission, setNotificationPermission] =
     useState<NotificationPermission | "unsupported">("default");
   const [sharedRoute, setSharedRoute] = useState<SharedRoutePreview | null>(null);
+  const [isBlockedByMe, setIsBlockedByMe] = useState(false);
+  const [isChatBlocked, setIsChatBlocked] = useState(false);
+  const [blockLoading, setBlockLoading] = useState(false);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -222,6 +229,23 @@ function Chat() {
   }, [activeConversation?.id]);
 
   useEffect(() => {
+    const otherId = activeConversation?.other_user?.id;
+    if (!otherId || !user) {
+      setIsBlockedByMe(false);
+      setIsChatBlocked(false);
+      return;
+    }
+
+    Promise.all([
+      isUserBlockedByMe(otherId),
+      areUsersBlocked(user.id, otherId),
+    ]).then(([byMe, blocked]) => {
+      setIsBlockedByMe(byMe);
+      setIsChatBlocked(blocked);
+    });
+  }, [activeConversation?.other_user?.id, user]);
+
+  useEffect(() => {
     scrollToBottom();
   }, [messages, scrollToBottom]);
 
@@ -260,6 +284,37 @@ function Chat() {
       setError(err.message || "Failed to send message");
     } finally {
       setSending(false);
+    }
+  };
+
+  const handleToggleBlock = async () => {
+    const otherId = activeConversation?.other_user?.id;
+    if (!otherId) return;
+
+    const confirmMsg = isBlockedByMe
+      ? "Розблокувати цього користувача?"
+      : "Заблокувати цього користувача? Ви не зможете обмінюватися повідомленнями.";
+    if (!window.confirm(confirmMsg)) return;
+
+    setBlockLoading(true);
+    try {
+      if (isBlockedByMe) {
+        await unblockUser(otherId);
+        setIsBlockedByMe(false);
+        setIsChatBlocked(false);
+      } else {
+        await blockUser(otherId);
+        setIsBlockedByMe(true);
+        setIsChatBlocked(true);
+        setActiveConversation(null);
+        navigate("/chat");
+        await loadConversations();
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Помилка блокування";
+      setError(message);
+    } finally {
+      setBlockLoading(false);
     }
   };
 
@@ -402,7 +457,31 @@ function Chat() {
                   <h5 className="mb-0">
                     {activeConversation.other_user?.full_name || "Unknown"}
                   </h5>
+                  {isChatBlocked && (
+                    <small className="text-muted">
+                      {isBlockedByMe
+                        ? "Користувача заблоковано"
+                        : "Повідомлення недоступні"}
+                    </small>
+                  )}
                 </div>
+                {activeConversation.other_user?.id && (
+                  <Button
+                    variant={isBlockedByMe ? "outline-secondary" : "outline-danger"}
+                    size="sm"
+                    className="me-2"
+                    onClick={handleToggleBlock}
+                    disabled={blockLoading}
+                  >
+                    {blockLoading ? (
+                      <Spinner animation="border" size="sm" />
+                    ) : isBlockedByMe ? (
+                      "Розблокувати"
+                    ) : (
+                      "Заблокувати"
+                    )}
+                  </Button>
+                )}
                 {notificationPermission === "default" && (
                   <Button
                     variant="outline-success"
@@ -527,6 +606,11 @@ function Chat() {
               </div>
 
               {/* Message input */}
+              {isChatBlocked && !isBlockedByMe && (
+                <Alert variant="warning" className="m-3 mb-0 py-2">
+                  Цей користувач недоступний для листування.
+                </Alert>
+              )}
               <Form onSubmit={handleSend} className="p-3 border-top">
                 {sharedRoute && (
                   <div className="mb-2 p-2 rounded bg-light border d-flex align-items-center">
@@ -558,12 +642,16 @@ function Chat() {
                     placeholder="Type a message..."
                     value={newMessage}
                     onChange={(e) => setNewMessage(e.target.value)}
-                    disabled={sending}
+                    disabled={sending || isChatBlocked}
                   />
                   <Button
                     type="submit"
                     variant="success"
-                    disabled={sending || (!newMessage.trim() && !sharedRoute) || sending}
+                    disabled={
+                      sending ||
+                      isChatBlocked ||
+                      (!newMessage.trim() && !sharedRoute)
+                    }
                   >
                     {sending ? (
                       <Spinner animation="border" size="sm" />

@@ -12,10 +12,13 @@ interface RouteItem {
   distance_km?: number;
   statistics?: { distanceKm?: number; estimatedTimeMinutes?: number };
   is_public?: boolean;
+  likes_count?: number;
   created_at: string;
   user_id?: string;
   points?: [number, number][];
 }
+
+const RADIUS_OPTIONS = [10, 25, 50, 100, 200];
 
 function normalizeRouteItem(route: RouteItem & { statistics?: { distanceKm?: number } }): RouteItem {
   return {
@@ -38,6 +41,23 @@ function Favorites() {
     "favorites" | "public" | "myPublished" | "myRoutes"
   >("myRoutes");
   const [publishing, setPublishing] = useState(false);
+  const [likedRouteIds, setLikedRouteIds] = useState<Set<string>>(new Set());
+  const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
+  const [radiusKm, setRadiusKm] = useState(50);
+  const [locationError, setLocationError] = useState<string | null>(null);
+
+  const requestUserLocation = () => {
+    setLocationError(null);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setUserLocation([pos.coords.longitude, pos.coords.latitude]);
+      },
+      () => {
+        setLocationError("Не вдалося визначити ваше місцезнаходження");
+      },
+      { enableHighAccuracy: false, timeout: 12000, maximumAge: 300000 }
+    );
+  };
 
   // Завантажити улюблені маршрути
   useEffect(() => {
@@ -61,14 +81,31 @@ function Favorites() {
     loadFavorites();
   }, [user]);
 
-  // Завантажити публічні маршрути
   useEffect(() => {
+    if (activeTab === "public" && !userLocation) {
+      requestUserLocation();
+    }
+  }, [activeTab]);
+
+  // Завантажити публічні маршрути (лайки + радіус)
+  useEffect(() => {
+    if (activeTab !== "public") return;
+
     const loadPublicRoutes = async () => {
       try {
         setLoading(true);
         setError(null);
-        const routes = await supabaseModules.getPublicRoutes();
+        const routes = await supabaseModules.getPublicRoutes({
+          userLocation: userLocation ?? undefined,
+          radiusKm: userLocation ? radiusKm : undefined,
+          limit: 50,
+        });
         setPublicRoutes(routes as RouteItem[]);
+
+        if (user) {
+          const liked = await supabaseModules.getLikedRouteIds(user.id);
+          setLikedRouteIds(liked);
+        }
       } catch (err) {
         console.error("Error loading public routes:", err);
         setError("Помилка завантаження публічних маршрутів");
@@ -79,7 +116,7 @@ function Favorites() {
     };
 
     loadPublicRoutes();
-  }, []);
+  }, [activeTab, userLocation, radiusKm, user]);
 
   // Завантажити мої опубліковані маршрути
   useEffect(() => {
@@ -232,6 +269,32 @@ function Favorites() {
     navigate("/home");
   };
 
+  const handleToggleLike = async (routeId: string) => {
+    if (!user) {
+      navigate("/login");
+      return;
+    }
+
+    try {
+      const result = await supabaseModules.toggleRouteLike(routeId);
+      setLikedRouteIds((prev) => {
+        const next = new Set(prev);
+        if (result.liked) next.add(routeId);
+        else next.delete(routeId);
+        return next;
+      });
+      setPublicRoutes((prev) =>
+        prev.map((r) =>
+          r.id === routeId ? { ...r, likes_count: result.likesCount } : r
+        )
+      );
+    } catch (err) {
+      console.error("Error toggling like:", err);
+      setError("Помилка при лайку маршруту");
+      setTimeout(() => setError(null), 3000);
+    }
+  };
+
   const handleShareRoute = (route: RouteItem) => {
     // Зберегти дані маршруту для шарингу та відкрити чат
     localStorage.setItem(
@@ -253,9 +316,11 @@ function Favorites() {
     route: RouteItem,
     isFavorite: boolean,
     isMyPublished: boolean = false,
-    isMyRoute: boolean = false
+    isMyRoute: boolean = false,
+    showLikes = false
   ) => {
     const item = normalizeRouteItem(route);
+    const isLiked = likedRouteIds.has(item.id);
     return (
     <Col md={4} sm={6} xs={12} key={item.id} className="mb-3">
       <Card className="h-100 shadow-sm">
@@ -265,7 +330,15 @@ function Favorites() {
           height={200}
         />
         <Card.Body>
-          <Card.Title className="text-truncate">{item.name}</Card.Title>
+          <div className="d-flex justify-content-between align-items-start gap-2 mb-1">
+            <Card.Title className="text-truncate mb-0 flex-grow-1">{item.name}</Card.Title>
+            {showLikes && (
+              <span className="badge bg-light text-dark border flex-shrink-0">
+                <i className="bi bi-heart-fill text-danger me-1"></i>
+                {item.likes_count ?? 0}
+              </span>
+            )}
+          </div>
           <Card.Text className="text-muted small">
             {item.description || "Без опису"}
           </Card.Text>
@@ -287,6 +360,17 @@ function Favorites() {
           </div>
 
           <div className="d-grid gap-2">
+            {showLikes && (
+              <Button
+                variant={isLiked ? "danger" : "outline-danger"}
+                size="sm"
+                onClick={() => handleToggleLike(item.id)}
+              >
+                <i className={`bi ${isLiked ? "bi-heart-fill" : "bi-heart"} me-1`}></i>
+                {isLiked ? "Вам подобається" : "Лайкнути"}
+              </Button>
+            )}
+
             <Button
               variant="primary"
               size="sm"
@@ -506,14 +590,58 @@ function Favorites() {
         </>
       ) : activeTab === "public" ? (
         <>
+          <Card className="mb-3 border-0 shadow-sm">
+            <Card.Body className="py-3">
+              <div className="d-flex flex-wrap align-items-end gap-3">
+                <div>
+                  <label className="form-label small fw-semibold mb-1">
+                    Радіус від вас
+                  </label>
+                  <select
+                    className="form-select form-select-sm"
+                    value={radiusKm}
+                    onChange={(e) => setRadiusKm(Number(e.target.value))}
+                    disabled={!userLocation}
+                  >
+                    {RADIUS_OPTIONS.map((km) => (
+                      <option key={km} value={km}>
+                        {km} км
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <Button
+                  variant="outline-success"
+                  size="sm"
+                  onClick={requestUserLocation}
+                >
+                  <i className="bi bi-crosshair me-1"></i>
+                  Моя локація
+                </Button>
+                <small className="text-muted">
+                  {userLocation
+                    ? "Список відсортовано за лайками поруч із вами"
+                    : "Увімкніть геолокацію для фільтра за відстанню"}
+                </small>
+              </div>
+              {locationError && (
+                <Alert variant="warning" className="mt-2 mb-0 py-2 small">
+                  {locationError}
+                </Alert>
+              )}
+            </Card.Body>
+          </Card>
+
           {publicRoutes.length === 0 ? (
             <Alert variant="info">
               <i className="bi bi-info-circle me-2"></i>
-              Публічних маршрутів поки немає.
+              {userLocation
+                ? `Публічних маршрутів у радіусі ${radiusKm} км не знайдено.`
+                : "Публічних маршрутів поки немає."}
             </Alert>
           ) : (
             <Row>
-              {publicRoutes.map((route) => renderRouteCard(route, false))}
+              {publicRoutes.map((route) => renderRouteCard(route, false, false, false, true))}
             </Row>
           )}
         </>

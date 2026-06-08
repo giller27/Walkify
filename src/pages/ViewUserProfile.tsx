@@ -19,6 +19,11 @@ import {
   getUserRoutes,
   SavedRoute,
 } from "../services/supabaseService";
+import {
+  blockUser,
+  unblockUser,
+  isUserBlockedByMe,
+} from "../services/chatService";
 import user from "../assets/images/user.png";
 
 function ViewUserProfile() {
@@ -30,6 +35,8 @@ function ViewUserProfile() {
   const [statistics, setStatistics] = useState<WalkStatistic[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isBlockedByMe, setIsBlockedByMe] = useState(false);
+  const [blockLoading, setBlockLoading] = useState(false);
 
   useEffect(() => {
     if (!id) {
@@ -69,6 +76,39 @@ function ViewUserProfile() {
 
     loadUserData();
   }, [id]);
+
+  useEffect(() => {
+    if (!id || !currentUser || id === currentUser.id) {
+      setIsBlockedByMe(false);
+      return;
+    }
+    isUserBlockedByMe(id).then(setIsBlockedByMe);
+  }, [id, currentUser]);
+
+  const handleToggleBlock = async () => {
+    if (!id || !currentUser || id === currentUser.id) return;
+
+    const confirmMsg = isBlockedByMe
+      ? "Розблокувати цього користувача?"
+      : "Заблокувати цього користувача? Ви не зможете обмінюватися повідомленнями.";
+    if (!window.confirm(confirmMsg)) return;
+
+    setBlockLoading(true);
+    try {
+      if (isBlockedByMe) {
+        await unblockUser(id);
+        setIsBlockedByMe(false);
+      } else {
+        await blockUser(id);
+        setIsBlockedByMe(true);
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Помилка блокування";
+      setError(message);
+    } finally {
+      setBlockLoading(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -228,14 +268,30 @@ function ViewUserProfile() {
               </div>
               <div className="d-flex gap-2 mt-4">
                 {currentUser && profile?.id !== currentUser.id && (
-                  <Button
-                    variant="success"
-                    className="flex-grow-1"
-                    onClick={() => navigate(`/chat?with=${profile?.id}`)}
-                  >
-                    <i className="bi bi-chat-dots me-2"></i>
-                    Message
-                  </Button>
+                  <>
+                    <Button
+                      variant="success"
+                      className="flex-grow-1"
+                      onClick={() => navigate(`/chat?with=${profile?.id}`)}
+                      disabled={isBlockedByMe}
+                    >
+                      <i className="bi bi-chat-dots me-2"></i>
+                      Написати
+                    </Button>
+                    <Button
+                      variant={isBlockedByMe ? "outline-secondary" : "outline-danger"}
+                      onClick={handleToggleBlock}
+                      disabled={blockLoading}
+                    >
+                      {blockLoading ? (
+                        <Spinner animation="border" size="sm" />
+                      ) : isBlockedByMe ? (
+                        "Розблокувати"
+                      ) : (
+                        "Заблокувати"
+                      )}
+                    </Button>
+                  </>
                 )}
                 <Button
                   variant="outline-success"
