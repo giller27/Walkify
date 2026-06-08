@@ -125,6 +125,11 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
     const [hasActiveRoute, setHasActiveRoute] = useState(false);
     const currentRouteRef = useRef<RouteResult | null>(null);
     const maxProgressIndexRef = useRef(0);
+    const onRouteSummaryRef = useRef(onRouteSummary);
+
+    useEffect(() => {
+      onRouteSummaryRef.current = onRouteSummary;
+    }, [onRouteSummary]);
 
     const updateUserMarker = useCallback((lngLat: [number, number], heading?: number | null) => {
       const map = mapRef.current;
@@ -148,6 +153,9 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
       } else {
         userMarkerRef.current.setPosition(pos);
         userMarkerRef.current.setIcon(createUserLocationIcon(headingRef.current));
+        if (!userMarkerRef.current.getMap()) {
+          userMarkerRef.current.setMap(map);
+        }
       }
     }, []);
 
@@ -179,8 +187,8 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
       }
 
       const stats = calculateRemainingRouteStats(route, idx, stepIdx);
-      onRouteSummary?.(formatRemainingRouteSummary(stats, route.difficulty));
-    }, [onRouteSummary]);
+      onRouteSummaryRef.current?.(formatRemainingRouteSummary(stats, route.difficulty));
+    }, []);
 
     const startLocationTracking = useCallback(() => {
       if (!navigator.geolocation) return;
@@ -322,13 +330,17 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
         markersRef.current.push(marker);
       });
 
-      if (userLocationRef.current) {
-        updateRouteProgress(userLocationRef.current);
+      if (userMarkerRef.current) {
+        userMarkerRef.current.setMap(map);
       }
 
-      const initialStats = calculateRemainingRouteStats(route, 0, 0);
-      onRouteSummary?.(formatRemainingRouteSummary(initialStats, route.difficulty));
-    }, [clearRouteLines, onRouteSummary, updateRouteProgress]);
+      if (userLocationRef.current) {
+        updateRouteProgress(userLocationRef.current);
+      } else {
+        const initialStats = calculateRemainingRouteStats(route, 0, 0);
+        onRouteSummaryRef.current?.(formatRemainingRouteSummary(initialStats, route.difficulty));
+      }
+    }, [clearRouteLines, updateRouteProgress]);
 
     const setDestinationMarker = useCallback((coords: [number, number]) => {
       const map = mapRef.current;

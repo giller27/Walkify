@@ -110,6 +110,11 @@ const Home: React.FC = () => {
     });
   };
 
+  const handleRouteSummary = useCallback((sum: string) => {
+    setRouteSummary(sum);
+    setHasRoute(true);
+  }, []);
+
   const handleClearRoute = () => {
     mapRef.current?.clearCurrentRoute();
     setRouteSummary("");
@@ -194,10 +199,7 @@ const Home: React.FC = () => {
 
           <RouteMap
             ref={mapRef}
-            onRouteSummary={(sum) => {
-              setRouteSummary(sum);
-              setHasRoute(true);
-            }}
+            onRouteSummary={handleRouteSummary}
             pickDestinationMode={isPickingOnMap}
             onDestinationPicked={handleDestinationPicked}
             onPickCancel={handlePickCancel}
