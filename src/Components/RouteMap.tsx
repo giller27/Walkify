@@ -39,6 +39,7 @@ export interface RouteMapRef {
   clearCurrentRoute: () => void;
   isGenerating: boolean;
   centerOnUser: () => void;
+  refreshMapLayout: () => void;
 }
 
 interface RouteMapProps {
@@ -502,7 +503,7 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
       const routeResult: RouteResult = {
         points: route.points,
         waypoints: safeWaypoints,
-        steps: (route as any).steps,
+        steps: (route as any).steps ?? (route as any).preferences?.steps,
         distanceKm: (route as any).statistics?.distanceKm || 0,
         estimatedTimeMinutes: (route as any).statistics?.estimatedTimeMinutes || 0,
         locations: (route as any).locations || [],
@@ -519,6 +520,13 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
       }
     }, []);
 
+    const refreshMapLayout = useCallback(() => {
+      const map = mapRef.current;
+      if (!map || !window.google) return;
+
+      google.maps.event.trigger(map, "resize");
+    }, []);
+
     useImperativeHandle(ref, () => ({
       generateRoute,
       loadSavedRoute,
@@ -533,6 +541,7 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
       getCurrentRoute: () => currentRouteRef.current,
       clearCurrentRoute: clearRouteAndMarkers,
       centerOnUser,
+      refreshMapLayout,
       isGenerating,
     }));
 

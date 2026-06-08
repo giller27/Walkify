@@ -10,10 +10,19 @@ interface RouteItem {
   name: string;
   description?: string;
   distance_km?: number;
+  statistics?: { distanceKm?: number; estimatedTimeMinutes?: number };
   is_public?: boolean;
   created_at: string;
   user_id?: string;
   points?: [number, number][];
+}
+
+function normalizeRouteItem(route: RouteItem & { statistics?: { distanceKm?: number } }): RouteItem {
+  return {
+    ...route,
+    distance_km: route.distance_km ?? route.statistics?.distanceKm ?? 0,
+    points: Array.isArray(route.points) ? route.points : [],
+  };
 }
 
 function Favorites() {
@@ -205,20 +214,22 @@ function Favorites() {
   };
 
   const handleViewRoute = (route: RouteItem) => {
-    // Зберегти маршрут для перегляду
-    if (route.points && Array.isArray(route.points)) {
+    const item = normalizeRouteItem(route);
+    if (item.points && item.points.length >= 2) {
       localStorage.setItem(
         "routeToView",
         JSON.stringify({
-          name: route.name,
-          description: route.description,
-          points: route.points,
-          distance_km: route.distance_km,
+          name: item.name,
+          description: item.description,
+          points: item.points,
+          distance_km: item.distance_km,
+          statistics: item.statistics ?? { distanceKm: item.distance_km },
+          waypoints: (route as RouteItem & { waypoints?: unknown }).waypoints,
+          preferences: (route as RouteItem & { preferences?: unknown }).preferences,
         })
       );
     }
-    // Перенаправити на домашню сторінку
-    navigate("/");
+    navigate("/home");
   };
 
   const handleShareRoute = (route: RouteItem) => {
@@ -243,30 +254,32 @@ function Favorites() {
     isFavorite: boolean,
     isMyPublished: boolean = false,
     isMyRoute: boolean = false
-  ) => (
-    <Col md={4} sm={6} xs={12} key={route.id} className="mb-3">
+  ) => {
+    const item = normalizeRouteItem(route);
+    return (
+    <Col md={4} sm={6} xs={12} key={item.id} className="mb-3">
       <Card className="h-100 shadow-sm">
         <MapPreview
-          points={route.points}
-          isPublic={route.is_public}
+          points={item.points}
+          isPublic={item.is_public}
           height={200}
         />
         <Card.Body>
-          <Card.Title className="text-truncate">{route.name}</Card.Title>
+          <Card.Title className="text-truncate">{item.name}</Card.Title>
           <Card.Text className="text-muted small">
-            {route.description || "Без опису"}
+            {item.description || "Без опису"}
           </Card.Text>
 
           <div className="mb-2">
             <small className="text-muted d-block">
               <i className="bi bi-arrows-angle-expand"></i>{" "}
-              {(route.distance_km || 0).toFixed(1)} км
+              {(item.distance_km || 0).toFixed(1)} км
             </small>
             <small className="text-muted d-block">
               <i className="bi bi-calendar"></i>{" "}
-              {new Date(route.created_at).toLocaleDateString("uk-UA")}
+              {new Date(item.created_at).toLocaleDateString("uk-UA")}
             </small>
-            {route.is_public && (
+            {item.is_public && (
               <small className="badge bg-success">
                 <i className="bi bi-globe"></i> Публічний
               </small>
@@ -277,7 +290,7 @@ function Favorites() {
             <Button
               variant="primary"
               size="sm"
-              onClick={() => handleViewRoute(route)}
+              onClick={() => handleViewRoute(item)}
             >
               <i className="bi bi-map"></i> Переглянути на карті
             </Button>
@@ -285,16 +298,16 @@ function Favorites() {
             <Button
               variant="outline-success"
               size="sm"
-              onClick={() => handleShareRoute(route)}
+              onClick={() => handleShareRoute(item)}
             >
               <i className="bi bi-share"></i> Поділитися в чаті
             </Button>
 
-            {!route.is_public && !isMyPublished && (
+            {!item.is_public && !isMyPublished && (
               <Button
                 variant="success"
                 size="sm"
-                onClick={() => handlePublishRoute(route.id)}
+                onClick={() => handlePublishRoute(item.id)}
                 disabled={publishing}
               >
                 {publishing ? (
@@ -321,7 +334,7 @@ function Favorites() {
               <Button
                 variant="outline-danger"
                 size="sm"
-                onClick={() => handleUnpublishRoute(route.id)}
+                onClick={() => handleUnpublishRoute(item.id)}
                 disabled={publishing}
               >
                 {publishing ? (
@@ -346,7 +359,7 @@ function Favorites() {
               <Button
                 variant="outline-danger"
                 size="sm"
-                onClick={() => handleRemoveFavorite(route.id)}
+                onClick={() => handleRemoveFavorite(item.id)}
               >
                 <i className="bi bi-heart-fill"></i> З улюблених
               </Button>
@@ -354,7 +367,7 @@ function Favorites() {
               <Button
                 variant="outline-success"
                 size="sm"
-                onClick={() => handleAddFavorite(route.id)}
+                onClick={() => handleAddFavorite(item.id)}
               >
                 <i className="bi bi-heart"></i> Улюблені
               </Button>
@@ -364,7 +377,7 @@ function Favorites() {
               <Button
                 variant="outline-danger"
                 size="sm"
-                onClick={() => handleDeleteRoute(route.id)}
+                onClick={() => handleDeleteRoute(item.id)}
                 disabled={publishing}
               >
                 {publishing ? (
@@ -391,6 +404,7 @@ function Favorites() {
       </Card>
     </Col>
   );
+  };
 
   if (!user) {
     return (

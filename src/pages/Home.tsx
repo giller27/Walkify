@@ -1,12 +1,24 @@
-import React, { useState, useRef, useCallback } from "react";
+import React, { useState, useRef, useCallback, useEffect } from "react";
+import { Modal, Button, Form } from "react-bootstrap";
+import { useNavigate } from "react-router-dom";
 import RouteMap, { RouteMapRef } from "../Components/RouteMap";
 import WalkPreferences from "../Components/WalkPreferences";
 import WalkFiltersMenu from "../Components/WalkFiltersMenu";
 import { generateRouteByFilters, generateRouteFromText, RouteFilterOptions, RouteDestination } from "../services/routeService";
+import { useAuth } from "../context/AuthContext";
+import { saveRoute } from "../services/supabaseService";
+import { buildSavedRouteFromResult, getDefaultRouteName } from "../utils/routeSave";
 import "../styles/home.css";
 
-const Home: React.FC = () => {
+interface HomeProps {
+  isActive?: boolean;
+}
+
+const Home: React.FC<HomeProps> = ({ isActive = true }) => {
   const mapRef = useRef<RouteMapRef>(null);
+  const navigate = useNavigate();
+  const { user } = useAuth();
+
   const [activeTab, setActiveTab] = useState<"filters" | "text">("filters");
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [routeSummary, setRouteSummary] = useState<string>("");
@@ -14,6 +26,51 @@ const Home: React.FC = () => {
   const [destination, setDestination] = useState<RouteDestination | null>(null);
   const [isPickingOnMap, setIsPickingOnMap] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [saveName, setSaveName] = useState("");
+  const [saveDescription, setSaveDescription] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (!isActive) return;
+    const frameId = requestAnimationFrame(() => {
+      mapRef.current?.refreshMapLayout();
+    });
+    return () => cancelAnimationFrame(frameId);
+  }, [isActive]);
+
+  useEffect(() => {
+    if (!isActive) return;
+    const raw = localStorage.getItem("routeToView");
+    if (!raw) return;
+
+    try {
+      const data = JSON.parse(raw);
+      if (!data.points?.length || !mapRef.current) return;
+
+      mapRef.current.loadSavedRoute({
+        name: data.name || "Збережений маршрут",
+        description: data.description,
+        points: data.points,
+        statistics: {
+          distanceKm: data.distance_km ?? data.statistics?.distanceKm ?? 0,
+          estimatedTimeMinutes: data.statistics?.estimatedTimeMinutes ?? 0,
+        },
+        waypoints: data.waypoints || [],
+        preferences: data.preferences,
+      });
+      setHasRoute(true);
+      if (data.distance_km || data.statistics?.distanceKm) {
+        const km = data.distance_km ?? data.statistics?.distanceKm;
+        const min = data.statistics?.estimatedTimeMinutes;
+        setRouteSummary(min ? `${km} км · ~${min} хв` : `${km} км`);
+      }
+    } catch (err) {
+      console.error("routeToView:", err);
+    } finally {
+      localStorage.removeItem("routeToView");
+    }
+  }, [isActive]);
 
   const loadRouteOnMap = useCallback((generatedRoute: Awaited<ReturnType<typeof generateRouteByFilters>>) => {
     if (!mapRef.current) return;
@@ -121,6 +178,41 @@ const Home: React.FC = () => {
     setHasRoute(false);
   };
 
+  const handleOpenSaveModal = () => {
+    if (!user) {
+      alert("Увійдіть у акаунт, щоб зберігати маршрути.");
+      navigate("/login");
+      return;
+    }
+
+    const route = mapRef.current?.getCurrentRoute();
+    if (!route?.points?.length) {
+      alert("Спочатку згенеруйте маршрут.");
+      return;
+    }
+
+    setSaveName(getDefaultRouteName(route));
+    setSaveDescription("");
+    setShowSaveModal(true);
+  };
+
+  const handleSaveRoute = async () => {
+    const route = mapRef.current?.getCurrentRoute();
+    if (!route || !saveName.trim()) return;
+
+    setIsSaving(true);
+    try {
+      await saveRoute(buildSavedRouteFromResult(route, saveName, saveDescription));
+      setShowSaveModal(false);
+      alert("Маршрут збережено! Переглянути можна у вкладці Routes.");
+    } catch (err) {
+      console.error(err);
+      alert("Не вдалося зберегти маршрут. Спробуйте ще раз.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
     <div className="container-fluid p-0 position-relative home-layout">
       <div
@@ -172,9 +264,20 @@ const Home: React.FC = () => {
           )}
 
           {routeSummary && sidebarOpen && (
-            <div className="alert alert-info mt-2 mt-md-3 border-0 rounded-3 small shadow-sm mb-0">
+            <div className="alert alert-info mt-2 mt-md-3 border-0 rounded-3 small shadow-sm mb-2">
               <i className="bi bi-info-circle me-2"></i> {routeSummary}
             </div>
+          )}
+
+          {hasRoute && (
+            <Button
+              variant="success"
+              className="w-100 rounded-3 shadow-sm"
+              onClick={handleOpenSaveModal}
+            >
+              <i className="bi bi-bookmark-plus me-2"></i>
+              Зберегти маршрут
+            </Button>
           )}
         </div>
 
@@ -197,6 +300,18 @@ const Home: React.FC = () => {
             </div>
           )}
 
+          {hasRoute && !isPickingOnMap && (
+            <button
+              type="button"
+              className="home-save-btn"
+              onClick={handleOpenSaveModal}
+              title="Зберегти маршрут"
+              aria-label="Зберегти маршрут"
+            >
+              <i className="bi bi-bookmark-plus"></i>
+            </button>
+          )}
+
           <RouteMap
             ref={mapRef}
             onRouteSummary={handleRouteSummary}
@@ -206,6 +321,46 @@ const Home: React.FC = () => {
           />
         </div>
       </div>
+
+      <Modal show={showSaveModal} onHide={() => setShowSaveModal(false)} centered>
+        <Modal.Header closeButton>
+          <Modal.Title>Зберегти маршрут</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <Form.Group className="mb-3">
+            <Form.Label>Назва</Form.Label>
+            <Form.Control
+              value={saveName}
+              onChange={(e) => setSaveName(e.target.value)}
+              placeholder="Назва маршруту"
+              maxLength={120}
+            />
+          </Form.Group>
+          <Form.Group>
+            <Form.Label>Опис (необовʼязково)</Form.Label>
+            <Form.Control
+              as="textarea"
+              rows={2}
+              value={saveDescription}
+              onChange={(e) => setSaveDescription(e.target.value)}
+              placeholder="Короткий опис прогулянки"
+              maxLength={500}
+            />
+          </Form.Group>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="outline-secondary" onClick={() => setShowSaveModal(false)}>
+            Скасувати
+          </Button>
+          <Button
+            variant="success"
+            onClick={handleSaveRoute}
+            disabled={isSaving || !saveName.trim()}
+          >
+            {isSaving ? "Збереження..." : "Зберегти"}
+          </Button>
+        </Modal.Footer>
+      </Modal>
     </div>
   );
 };
