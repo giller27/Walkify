@@ -1,3 +1,4 @@
+/// <reference types="google.maps" />
 import React, {
   useEffect,
   useRef,
@@ -11,9 +12,7 @@ import {
   RouteWaypoint,
 } from "../services/routeService";
 import type { SavedRoute } from "../services/supabaseService";
-import { loadGoogleMaps } from "../services/googleMapsLoader";
-import { getTerrainInfo } from "../services/routeOptions";
-import type { RouteOptions } from "../types/routeEnhancements";
+import type { RouteDifficulty } from "../types/routeEnhancements";
 
 export interface WalkPreferences {
   prompt: string;
@@ -39,112 +38,162 @@ interface RouteMapProps {
     locations: string[];
     prompt?: string;
     estimatedTimeMinutes: number;
+    difficulty?: RouteDifficulty;
   }) => void;
   panelExpanded?: boolean;
 }
 
-const typeColorMap: Record<string, string> = {
-  cafe: "#ff8c00",
-  restaurant: "#ff5722",
-  park: "#4caf50",
-  shop: "#3f51b5",
-  museum: "#9c27b0",
-  library: "#03a9f4",
+// ─── Кольори маркерів за типом POI ───────────────────────────────────────────
+const TYPE_COLOR_MAP: Record<string, string> = {
+  cafe:             "#ff8c00",
+  coffee:           "#d4813a",
+  restaurant:       "#ff5722",
+  park:             "#4caf50",
+  shop:             "#3f51b5",
+  store:            "#3f51b5",
+  supermarket:      "#3f51b5",
+  museum:           "#9c27b0",
+  library:          "#03a9f4",
   place_of_worship: "#795548",
-  beach: "#ffc107",
-  lake: "#2196f3",
-  river: "#00bcd4",
-  custom: "#6c757d",
+  church:           "#795548",
+  beach:            "#ffc107",
+  lake:             "#2196f3",
+  river:            "#00bcd4",
+  natural_feature:  "#4caf50",
+  fountain:         "#29b6f6",
+  viewpoint:        "#ff7043",
+  monument:         "#8d6e63",
+  playground:       "#ec407a",
+  cinema:           "#ab47bc",
+  theatre:          "#7e57c2",
+  pharmacy:         "#26a69a",
+  bakery:           "#ffca28",
+  zoo:              "#66bb6a",
+  attraction:       "#ef5350",
+  point_of_interest:"#ef5350",
+  sport:            "#42a5f5",
+  hotel:            "#5c6bc0",
+  custom:           "#6c757d",
 };
+
+// ─── Іконки типів POI ────────────────────────────────────────────────────────
+const TYPE_EMOJI: Record<string, string> = {
+  cafe:             "☕",
+  coffee:           "☕",
+  restaurant:       "🍽️",
+  park:             "🌿",
+  shop:             "🛍️",
+  store:            "🛍️",
+  supermarket:      "🛒",
+  museum:           "🏛️",
+  library:          "📚",
+  place_of_worship: "⛪",
+  church:           "⛪",
+  beach:            "🏖️",
+  lake:             "🌊",
+  river:            "🌊",
+  natural_feature:  "🌲",
+  fountain:         "⛲",
+  viewpoint:        "🔭",
+  monument:         "🗿",
+  playground:       "🎠",
+  cinema:           "🎬",
+  theatre:          "🎭",
+  pharmacy:         "💊",
+  bakery:           "🥐",
+  zoo:              "🦁",
+  attraction:       "⭐",
+  point_of_interest:"⭐",
+  sport:            "⚽",
+  hotel:            "🏨",
+  custom:           "📍",
+};
+
+// ─── Допоміжна функція для SVG Маркерів Google Maps ────────────────────────
+function createSvgIcon(emoji: string, color: string): google.maps.Icon {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 36 36">
+    <circle cx="18" cy="18" r="15" fill="${color}" stroke="#fff" stroke-width="2.5"/>
+    <text x="18" y="23" font-size="14" text-anchor="middle" font-family="sans-serif">${emoji}</text>
+  </svg>`;
+  return {
+    url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg),
+    scaledSize: new google.maps.Size(36, 36),
+    anchor: new google.maps.Point(18, 18),
+  };
+}
+
+// ─── Компонент ────────────────────────────────────────────────────────────────
 
 const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
   ({ onRouteSummary, onRouteGenerated, panelExpanded = true }, ref) => {
     const mapContainerRef = useRef<HTMLDivElement>(null);
-    const mapRef = useRef<any>(null);
-    const routeLineRef = useRef<any>(null);
-    const markersRef = useRef<any[]>([]);
-    const [userLocation, setUserLocation] = useState<[number, number] | null>(
-      null
-    );
+    const mapRef = useRef<google.maps.Map | null>(null);
+    
+    // Рефи для об'єктів Google Maps
+    const routeLineRef = useRef<google.maps.Polyline | null>(null);
+    const markersRef = useRef<google.maps.Marker[]>([]);
+    const userMarkerRef = useRef<google.maps.Marker | null>(null);
+
+    const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
     const [isGenerating, setIsGenerating] = useState(false);
     const currentRouteRef = useRef<RouteResult | null>(null);
     const [selectedPoi, setSelectedPoi] = useState<RouteWaypoint | null>(null);
-    const [advancedOptions, setAdvancedOptions] = useState<RouteOptions | null>(null);
+    
+    const [routeReadyToStart, setRouteReadyToStart] = useState(false);
+    const [navigationMode, setNavigationMode] = useState(false);
+    const [navMessage, setNavMessage] = useState<string | null>(null);
+    const [navDistance, setNavDistance] = useState<number | null>(null);
+    const [navInstruction, setNavInstruction] = useState<string | null>(null);
 
+    // ── Ініціалізація карти Google ──────────────────────────────────────────
     useEffect(() => {
-      let disposed = false;
+      if (!mapContainerRef.current || !window.google) return;
 
-      const initMap = async () => {
-        if (!mapContainerRef.current) return;
+      const map = new google.maps.Map(mapContainerRef.current, {
+        center: { lat: 50.4501, lng: 30.5234 },
+        zoom: 13,
+        disableDefaultUI: true,
+        zoomControl: true,
+        mapId: "DEMO_MAP_ID", // Дозволяє використовувати векторні функції, такі як Heading
+      });
 
-        try {
-          const maps = await loadGoogleMaps(["places"]);
-          if (disposed || !mapContainerRef.current) return;
+      mapRef.current = map;
 
-          const map = new maps.Map(mapContainerRef.current, {
-            center: { lat: 50.4501, lng: 30.5234 },
-            zoom: 13,
-            mapTypeControl: false,
-            streetViewControl: false,
-            fullscreenControl: true,
-          });
-
-          mapRef.current = map;
-
-          if (navigator.geolocation) {
-            navigator.geolocation.getCurrentPosition(
-              (position) => {
-                const { longitude, latitude } = position.coords;
-                setUserLocation([longitude, latitude]);
-                const latLng = { lat: latitude, lng: longitude };
-                map.panTo(latLng);
-                map.setZoom(15);
-
-                const marker = new maps.Marker({
-                  map,
-                  position: latLng,
-                  title: "Ваша позиція",
-                  icon: {
-                    path: maps.SymbolPath.CIRCLE,
-                    scale: 8,
-                    fillColor: "#28a745",
-                    fillOpacity: 1,
-                    strokeColor: "#ffffff",
-                    strokeWeight: 2,
-                  },
-                });
-                markersRef.current.push(marker);
-              },
-              (error) => {
-                console.error("Помилка отримання геолокації:", error);
-              }
-            );
-          }
-        } catch (error) {
-          console.error("Помилка ініціалізації Google Maps:", error);
-          alert(
-            error instanceof Error
-              ? error.message
-              : "Не вдалося завантажити Google Maps."
-          );
-        }
-      };
-
-      initMap();
-
-      return () => {
-        disposed = true;
-        clearMarkers();
-        if (routeLineRef.current) {
-          routeLineRef.current.setMap(null);
-          routeLineRef.current = null;
-        }
-        mapRef.current = null;
-      };
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            const { longitude, latitude } = position.coords;
+            setUserLocation([longitude, latitude]);
+            map.panTo({ lat: latitude, lng: longitude });
+            map.setZoom(15);
+            addUserMarker(map, longitude, latitude);
+          },
+          (error) => console.error("Помилка геолокації:", error)
+        );
+      }
     }, []);
 
+    // ── Маркер користувача ──────────────────────────────────────────────────
+    const addUserMarker = (map: google.maps.Map, lng: number, lat: number) => {
+      if (userMarkerRef.current) userMarkerRef.current.setMap(null);
+      
+      userMarkerRef.current = new google.maps.Marker({
+        position: { lat, lng },
+        map,
+        icon: {
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: 8,
+          fillColor: '#28a745',
+          fillOpacity: 1,
+          strokeColor: '#ffffff',
+          strokeWeight: 3,
+        },
+        title: "Ваша позиція"
+      });
+    };
+
     const clearMarkers = () => {
-      markersRef.current.forEach((marker) => marker.setMap(null));
+      markersRef.current.forEach((m) => m.setMap(null));
       markersRef.current = [];
     };
 
@@ -155,96 +204,69 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
       }
     };
 
-    const displayRoute = async (route: RouteResult) => {
-      if (!mapRef.current) {
-        console.warn("Map not ready yet");
-        return;
-      }
+    // ── Відображення маршруту ───────────────────────────────────────────────
+    const displayRoute = (route: RouteResult) => {
+      const map = mapRef.current;
+      if (!map) return;
 
       try {
-        const maps = await loadGoogleMaps(["places"]);
         clearRoute();
         clearMarkers();
         setSelectedPoi(null);
+        setRouteReadyToStart(true);
+        setNavigationMode(false);
+        setNavMessage(
+          route.waypoints?.[0]?.name
+            ? `Готово! Натисніть «Почати», щоб рухатися до ${route.waypoints[0].name}`
+            : "Готово! Натисніть «Почати», щоб розпочати навігацію"
+        );
 
-        const path = route.points.map(([lat, lng]) => ({ lat, lng }));
+        const path = route.points.map(p => ({ lat: p[0], lng: p[1] }));
 
-        routeLineRef.current = new maps.Polyline({
-          map: mapRef.current,
+        // Малювання лінії маршруту
+        routeLineRef.current = new google.maps.Polyline({
           path,
-          strokeColor: "#28a745",
-          strokeOpacity: 0.85,
+          geodesic: true,
+          strokeColor: '#28a745',
+          strokeOpacity: 0.9,
           strokeWeight: 5,
+          map
         });
 
-        if (path.length > 0) {
-          markersRef.current.push(
-            new maps.Marker({
-              map: mapRef.current,
-              position: path[0],
-              title: "Початок маршруту",
-              icon: {
-                path: maps.SymbolPath.CIRCLE,
-                scale: 8,
-                fillColor: "#28a745",
-                fillOpacity: 1,
-                strokeColor: "#ffffff",
-                strokeWeight: 2,
-              },
-            })
-          );
-        }
+        // Вписуємо карту в межі маршруту
+        const bounds = new google.maps.LatLngBounds();
+        path.forEach(p => bounds.extend(p));
+        map.fitBounds(bounds);
 
-        route.waypoints?.forEach((waypoint) => {
-          const [lat, lng] = waypoint.location;
-          const marker = new maps.Marker({
-            map: mapRef.current,
-            position: { lat, lng },
-            title: waypoint.name,
-            icon: {
-              path: maps.SymbolPath.CIRCLE,
-              scale: 8,
-              fillColor: typeColorMap[waypoint.type] || typeColorMap.custom,
-              fillOpacity: 1,
-              strokeColor: "#ffffff",
-              strokeWeight: 2,
-            },
+        // Маркери POI
+        route.waypoints.forEach((wp, idx) => {
+          const color = TYPE_COLOR_MAP[wp.type] || TYPE_COLOR_MAP["custom"];
+          const emoji = TYPE_EMOJI[wp.type] || "📍";
+
+          const marker = new google.maps.Marker({
+            position: { lat: wp.location[0], lng: wp.location[1] },
+            map,
+            title: wp.name,
+            icon: createSvgIcon(emoji, color)
           });
-          marker.addListener("click", () => setSelectedPoi(waypoint));
+
+          marker.addListener("click", () => {
+            setSelectedPoi(wp);
+            map.panTo(marker.getPosition() as google.maps.LatLng);
+          });
+          
           markersRef.current.push(marker);
         });
 
-        if (path.length > 0) {
-          markersRef.current.push(
-            new maps.Marker({
-              map: mapRef.current,
-              position: path[path.length - 1],
-              title: "Кінець маршруту",
-              icon: {
-                path: maps.SymbolPath.CIRCLE,
-                scale: 8,
-                fillColor: "#dc3545",
-                fillOpacity: 1,
-                strokeColor: "#ffffff",
-                strokeWeight: 2,
-              },
-            })
-          );
-
-          const bounds = new maps.LatLngBounds();
-          path.forEach((point) => bounds.extend(point));
-          mapRef.current.fitBounds(bounds, 50);
-        }
-      } catch (error) {
-        console.error("Error displaying route:", error);
+      } catch (err) {
+        console.error("Помилка відображення маршруту:", err);
       }
     };
 
+    // ── Генерація маршруту ──────────────────────────────────────────────────
     const generateRoute = async (preferences: WalkPreferences) => {
       if (!userLocation) {
-        alert(
-          "Будь ласка, дозвольте доступ до геолокації або вкажіть вашу позицію"
-        );
+        alert("Будь ласка, дозвольте доступ до геолокації");
         return;
       }
 
@@ -253,188 +275,131 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
         const route = await generateRouteFromText(
           userLocation,
           preferences.prompt,
-          {
-            routeMode: preferences.routeMode,
-          }
+          { routeMode: preferences.routeMode }
         );
+
         currentRouteRef.current = route;
+        displayRoute(route);
 
-        setAdvancedOptions(route.options ?? null);
-
-        await displayRoute(route);
-
-        const summary = `${route.distanceKm} км, ~${
-          route.estimatedTimeMinutes
-        } хв. ${
-          route.locations.length > 0
-            ? `Через: ${route.locations.join(", ")}`
-            : ""
+        const poiNames = route.waypoints.map((w) => w.name).join(", ");
+        const diffStr = route.difficulty ? ` · ${route.difficulty}` : '';
+        const summary = `${route.distanceKm} км · ~${route.estimatedTimeMinutes} хв${diffStr}${
+          poiNames ? ` · ${poiNames}` : ""
         }`;
-        onRouteSummary?.(summary);
 
+        onRouteSummary?.(summary);
         onRouteGenerated?.({
           distanceKm: route.distanceKm,
           locations: route.locations,
           prompt: preferences.prompt,
           estimatedTimeMinutes: route.estimatedTimeMinutes,
+          difficulty: route.difficulty
         });
       } catch (error: any) {
         console.error("Помилка генерації маршруту:", error);
-        alert(
-          error.message ||
-            "Не вдалося згенерувати маршрут. Спробуйте інший запит."
-        );
+        alert(error.message || "Не вдалося згенерувати маршрут. Спробуйте інший запит.");
         onRouteSummary?.("");
       } finally {
         setIsGenerating(false);
       }
     };
 
+    // ── Завантаження збереженого маршруту ───────────────────────────────────
     const loadSavedRoute = async (route: SavedRoute) => {
-      if (!mapRef.current) {
-        console.warn("Map not ready, waiting...");
-        return;
-      }
+      if (!mapRef.current) return;
 
       setIsGenerating(true);
       try {
         if (!route.points || !Array.isArray(route.points)) {
-          throw new Error("Invalid route: missing points");
+          throw new Error("Маршрут не містить точок");
         }
 
-        let distanceKm = 0;
-        let estimatedTimeMinutes = 0;
+        let distanceKm = route.statistics?.distanceKm || (route as any).distance_km || 0;
+        let estimatedTimeMinutes = route.statistics?.estimatedTimeMinutes || (route as any).duration_minutes || 0;
 
-        if (route.statistics && typeof route.statistics === "object") {
-          distanceKm = route.statistics.distanceKm || 0;
-          estimatedTimeMinutes = route.statistics.estimatedTimeMinutes || 0;
-        }
-
-        if (
-          (distanceKm === 0 || estimatedTimeMinutes === 0) &&
-          (route as any).distance_km
-        ) {
-          distanceKm = (route as any).distance_km;
-          estimatedTimeMinutes =
-            (route as any).duration_minutes ||
-            Math.round((distanceKm / 5) * 60);
-        }
-
-        if (distanceKm === 0 && route.points.length > 0) {
-          const calculateDistance = (
-            lat1: number,
-            lon1: number,
-            lat2: number,
-            lon2: number
-          ) => {
-            const R = 6371;
-            const dLat = ((lat2 - lat1) * Math.PI) / 180;
-            const dLon = ((lon2 - lon1) * Math.PI) / 180;
-            const a =
-              Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-              Math.cos((lat1 * Math.PI) / 180) *
-                Math.cos((lat2 * Math.PI) / 180) *
-                Math.sin(dLon / 2) *
-                Math.sin(dLon / 2);
-            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-            return R * c;
-          };
-
-          for (let i = 0; i < route.points.length - 1; i++) {
-            const [lat1, lon1] = route.points[i];
-            const [lat2, lon2] = route.points[i + 1];
-            distanceKm += calculateDistance(lat1, lon1, lat2, lon2);
-          }
-
-          if (distanceKm < 0.5) {
-            distanceKm = 0.5;
-          }
-
-          estimatedTimeMinutes = Math.round((distanceKm / 5) * 60);
-        }
-
-        if (distanceKm === 0) {
-          throw new Error("Invalid route: could not determine distance");
-        }
+        const safeWaypoints: RouteWaypoint[] = ((route as any).waypoints || []).map((wp: any) => ({
+          location: wp.location,
+          name: wp.name,
+          type: wp.type,
+          address: wp.address,
+          rating: wp.rating,
+          userRatingsTotal: wp.userRatingsTotal,
+          photoUrl: wp.photoUrl,
+          description: wp.description,
+          source: (wp.source === 'google' ? 'google' : 'custom') as 'google' | 'custom'
+        }));
 
         const routeResult: RouteResult = {
           points: route.points,
-          waypoints: route.waypoints || [],
-          distanceKm: Math.round(distanceKm * 10) / 10,
+          waypoints: safeWaypoints,
+          distanceKm,
           estimatedTimeMinutes,
-          locations: route.preferences?.locations || [],
+          locations: (route as any).locations || [],
+          difficulty: (route as any).difficulty,
         };
 
         currentRouteRef.current = routeResult;
-        await displayRoute(routeResult);
-
-        onRouteSummary?.(
-          `${routeResult.distanceKm} км, ~${routeResult.estimatedTimeMinutes} хв.`
-        );
+        displayRoute(routeResult);
+        
+        const diffStr = routeResult.difficulty ? ` · ${routeResult.difficulty}` : '';
+        onRouteSummary?.(`${distanceKm} км · ~${estimatedTimeMinutes} хв${diffStr}`);
       } catch (error) {
         console.error("Помилка завантаження маршруту:", error);
-        alert(
-          "Не вдалося завантажити маршрут: " +
-            (error instanceof Error ? error.message : String(error))
-        );
+        alert("Не вдалося завантажити маршрут: " + (error instanceof Error ? error.message : String(error)));
       } finally {
         setIsGenerating(false);
       }
     };
 
+    // ── Геолокація ──────────────────────────────────────────────────────────
     const requestGeolocation = () => {
       if (!navigator.geolocation) {
         alert("Ваш браузер не підтримує геолокацію");
         return;
       }
-
       navigator.geolocation.getCurrentPosition(
-        async (position) => {
+        (position) => {
           const { longitude, latitude } = position.coords;
           setUserLocation([longitude, latitude]);
-
           if (mapRef.current) {
-            const maps = await loadGoogleMaps(["places"]);
-            const latLng = { lat: latitude, lng: longitude };
-            mapRef.current.panTo(latLng);
+            mapRef.current.panTo({ lat: latitude, lng: longitude });
             mapRef.current.setZoom(15);
-
-            clearMarkers();
-
-            const marker = new maps.Marker({
-              map: mapRef.current,
-              position: latLng,
-              title: "Ваша позиція",
-              icon: {
-                path: maps.SymbolPath.CIRCLE,
-                scale: 8,
-                fillColor: "#28a745",
-                fillOpacity: 1,
-                strokeColor: "#ffffff",
-                strokeWeight: 2,
-              },
-            });
-            markersRef.current.push(marker);
+            addUserMarker(mapRef.current, longitude, latitude);
           }
         },
-        (error) => {
-          console.error("Помилка отримання геолокації:", error);
-          alert(
-            "Не вдалося отримати вашу позицію. Перевірте налаштування браузера."
-          );
-        }
+        () => alert("Не вдалося отримати позицію. Перевірте налаштування браузера.")
       );
     };
 
-    useEffect(() => {
-      if (mapRef.current) {
-        setTimeout(() => {
-          const center = mapRef.current.getCenter();
-          window.google?.maps.event.trigger(mapRef.current, "resize");
-          if (center) mapRef.current.setCenter(center);
-        }, 300);
-      }
-    }, [panelExpanded]);
+    // ── Навігаційні функції ─────────────────────────────────────────────────
+    const startNavigation = () => {
+      const route = currentRouteRef.current;
+      const map = mapRef.current;
+      if (!route || !map || route.points.length < 2) return;
+      
+      setNavigationMode(true);
+      setRouteReadyToStart(false);
+      setNavMessage(`GPS Навігація активована`);
+      
+      // Google Maps Нахил камери для навігації
+      map.setTilt(45);
+      map.setZoom(18);
+    };
+
+    const stopNavigation = () => {
+      const map = mapRef.current;
+      if (!map) return;
+      
+      map.setHeading(0);
+      map.setTilt(0);
+      map.setZoom(14);
+      
+      setNavigationMode(false);
+      setRouteReadyToStart(false);
+      setNavMessage(null);
+      setNavDistance(null);
+      setNavInstruction(null);
+    };
 
     useImperativeHandle(ref, () => ({
       generateRoute,
@@ -442,11 +407,13 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
       requestGeolocation,
       getCurrentRoute: () => currentRouteRef.current,
       clearCurrentRoute: () => {
+        if (navigationMode) stopNavigation();
         clearRoute();
         clearMarkers();
         currentRouteRef.current = null;
         setSelectedPoi(null);
-        setAdvancedOptions(null);
+        setRouteReadyToStart(false);
+        setNavMessage(null);
       },
       isGenerating,
     }));
@@ -464,6 +431,107 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
             transition: "height 0.3s ease-in-out",
           }}
         />
+
+        {(routeReadyToStart || navigationMode) && (
+          <div
+            style={{
+              position: "fixed",
+              left: 16,
+              top: 76,
+              right: "auto",
+              bottom: "auto",
+              zIndex: 1200,
+              display: "flex",
+              justifyContent: "flex-start",
+              pointerEvents: "none",
+            }}
+          >
+            <div
+              style={{
+                backgroundColor: navigationMode ? "rgba(0,0,0,0.85)" : "rgba(0,0,0,0.72)",
+                color: "#fff",
+                borderRadius: 16,
+                padding: navigationMode ? "16px 20px" : "14px 18px",
+                minWidth: navigationMode ? 360 : 280,
+                maxWidth: 480,
+                boxShadow: "0 16px 40px rgba(0,0,0,0.3)",
+                pointerEvents: "auto",
+              }}
+            >
+              {routeReadyToStart && !navigationMode ? (
+                <>
+                  <div style={{ marginBottom: 10, fontWeight: 700, fontSize: "1rem", display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Маршрут готовий</span>
+                    {currentRouteRef.current?.difficulty && (
+                      <span style={{ fontSize: "0.8rem", padding: "2px 8px", background: "#4caf50", borderRadius: "10px" }}>
+                        {currentRouteRef.current.difficulty}
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ marginBottom: 14, color: "#d1d5db" }}>
+                    {navMessage || "Натисніть «Почати», щоб перейти в режим навігації"}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={startNavigation}
+                    style={{
+                      width: "100%",
+                      border: "none",
+                      borderRadius: 12,
+                      padding: "10px 0",
+                      backgroundColor: "#28a745",
+                      color: "#fff",
+                      fontWeight: 700,
+                      fontSize: "0.95rem",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Почати маршрут
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div style={{ marginBottom: 8, fontWeight: 700, fontSize: "1.2rem", lineHeight: 1.2 }}>
+                    {navDistance !== null ? (
+                      <>
+                        <span style={{ color: "#4ade80", fontSize: "1.4rem", fontWeight: 800 }}>
+                          {navDistance < 1000 ? `${navDistance}м` : `${(navDistance / 1000).toFixed(1)}км`}
+                        </span>
+                        {navInstruction && (
+                          <div style={{ marginTop: 4, fontSize: "0.95rem", color: "#e5e7eb" }}>
+                            {navInstruction}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <span>{navMessage}</span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={stopNavigation}
+                    style={{
+                      marginTop: 12,
+                      width: "100%",
+                      border: "1px solid rgba(255,255,255,0.18)",
+                      borderRadius: 12,
+                      padding: "8px 0",
+                      backgroundColor: "transparent",
+                      color: "#fff",
+                      fontWeight: 600,
+                      fontSize: "0.9rem",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Завершити навігацію
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Картка вибраного POI */}
         {selectedPoi && (
           <div
             style={{
@@ -472,197 +540,60 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
               bottom: panelExpanded ? 200 : 80,
               zIndex: 1200,
               backgroundColor: "#ffffff",
-              borderRadius: 12,
-              boxShadow: "0 4px 16px rgba(0,0,0,0.2)",
-              padding: 12,
-              maxWidth: 280,
+              borderRadius: 14,
+              boxShadow: "0 6px 24px rgba(0,0,0,0.18)",
+              padding: "14px 16px",
+              maxWidth: 290,
+              minWidth: 220,
+              borderLeft: `4px solid ${TYPE_COLOR_MAP[selectedPoi.type] || "#6c757d"}`,
             }}
           >
-            <div className="d-flex justify-content-between align-items-start mb-2">
+            <div className="d-flex justify-content-between align-items-start mb-1">
               <div>
-                <div style={{ fontWeight: 600, fontSize: "0.95rem" }}>
-                  {selectedPoi.name}
+                <div style={{ fontWeight: 700, fontSize: "0.95rem", lineHeight: 1.3 }}>
+                  {TYPE_EMOJI[selectedPoi.type] || "📍"} {selectedPoi.name}
                 </div>
-                <div
-                  style={{
-                    fontSize: "0.8rem",
-                    color: "#6c757d",
-                    textTransform: "capitalize",
-                  }}
-                >
-                  {selectedPoi.type}
+                <div style={{ fontSize: "0.75rem", color: "#888", textTransform: "capitalize", marginTop: 2 }}>
+                  {selectedPoi.type.replace('_', ' ')}
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setSelectedPoi(null)}
                 style={{
-                  border: "none",
-                  background: "transparent",
-                  cursor: "pointer",
-                  padding: 0,
-                  marginLeft: 8,
+                  border: "none", background: "transparent",
+                  cursor: "pointer", padding: "2px 4px", marginLeft: 8,
+                  color: "#999", fontSize: "1rem",
                 }}
-                aria-label="Закрити"
               >
-                <i className="bi bi-x-lg" />
+                ✕
               </button>
             </div>
+
             {selectedPoi.photoUrl && (
-              <div
-                style={{
-                  marginBottom: 8,
-                  borderRadius: 8,
-                  overflow: "hidden",
-                  maxHeight: 140,
-                }}
-              >
-                <img
-                  src={selectedPoi.photoUrl}
-                  alt={selectedPoi.name}
-                  style={{ width: "100%", objectFit: "cover" }}
-                />
+              <div style={{ marginBottom: 8, borderRadius: 8, overflow: "hidden", maxHeight: 140 }}>
+                <img src={selectedPoi.photoUrl} alt={selectedPoi.name} style={{ width: "100%", objectFit: "cover" }} />
               </div>
             )}
+
             {selectedPoi.address && (
-              <div
-                style={{
-                  fontSize: "0.8rem",
-                  color: "#495057",
-                  marginBottom: 4,
-                }}
-              >
-                <i className="bi bi-geo-alt me-1" />
-                {selectedPoi.address}
+              <div style={{ fontSize: "0.78rem", color: "#555", marginBottom: 4 }}>
+                📌 {selectedPoi.address}
               </div>
             )}
+
             {typeof selectedPoi.rating === "number" && (
-              <div
-                style={{
-                  fontSize: "0.8rem",
-                  color: "#343a40",
-                  marginBottom: 4,
-                }}
-              >
-                <i className="bi bi-star-fill text-warning me-1" />
-                {selectedPoi.rating.toFixed(1)}
-                {typeof selectedPoi.userRatingsTotal === "number" &&
-                  selectedPoi.userRatingsTotal > 0 && (
-                    <span className="text-muted ms-1">
-                      ({selectedPoi.userRatingsTotal})
-                    </span>
-                  )}
+              <div style={{ fontSize: "0.78rem", color: "#333", marginBottom: 4 }}>
+                ⭐ {selectedPoi.rating.toFixed(1)}
+                {typeof selectedPoi.userRatingsTotal === "number" && selectedPoi.userRatingsTotal > 0 && (
+                  <span style={{ color: "#999", marginLeft: 4 }}>({selectedPoi.userRatingsTotal})</span>
+                )}
               </div>
             )}
-            {(() => {
-              const terrainInfo = getTerrainInfo(selectedPoi);
-              return (
-                <div
-                  style={{
-                    fontSize: "0.8rem",
-                    color: "#495057",
-                    marginBottom: 4,
-                  }}
-                >
-                  <i className="bi bi-shuffle me-1" />
-                  Тип поверхні: <span style={{ textTransform: "capitalize" }}>{terrainInfo.type}</span>
-                </div>
-              );
-            })()}
+
             {selectedPoi.description && (
-              <div
-                style={{
-                  fontSize: "0.8rem",
-                  color: "#495057",
-                  marginTop: 4,
-                }}
-              >
+              <div style={{ fontSize: "0.75rem", color: "#0066cc", marginTop: 6, fontWeight: 500 }}>
                 {selectedPoi.description}
-              </div>
-            )}
-            {selectedPoi.source && (
-              <div
-                style={{
-                  fontSize: "0.7rem",
-                  color: "#adb5bd",
-                  marginTop: 6,
-                }}
-              >
-                Джерело: {selectedPoi.source}
-              </div>
-            )}
-          </div>
-        )}
-        {advancedOptions && (
-          <div
-            style={{
-              position: "fixed",
-              left: 16,
-              bottom: panelExpanded ? 200 : 80,
-              zIndex: 1200,
-              backgroundColor: "#ffffff",
-              borderRadius: 12,
-              boxShadow: "0 4px 16px rgba(0,0,0,0.2)",
-              padding: 12,
-              maxWidth: 280,
-            }}
-          >
-            <div style={{ fontWeight: 600, fontSize: "0.95rem", marginBottom: 8 }}>
-              Параметри маршруту
-            </div>
-            <div
-              style={{
-                display: "flex",
-                gap: 8,
-                marginBottom: 8,
-                flexWrap: "wrap",
-              }}
-            >
-              <span
-                style={{
-                  padding: "4px 12px",
-                  borderRadius: 20,
-                  fontSize: "0.85rem",
-                  fontWeight: 500,
-                  backgroundColor:
-                    advancedOptions.difficulty === "Easy"
-                      ? "#d4edda"
-                      : advancedOptions.difficulty === "Moderate"
-                      ? "#fff3cd"
-                      : "#f8d7da",
-                  color:
-                    advancedOptions.difficulty === "Easy"
-                      ? "#155724"
-                      : advancedOptions.difficulty === "Moderate"
-                      ? "#856404"
-                      : "#721c24",
-                }}
-              >
-                {advancedOptions.difficulty}
-              </span>
-            </div>
-            {advancedOptions.elevationGain !== undefined && (
-              <div style={{ fontSize: "0.8rem", marginBottom: 4 }}>
-                <i className="bi bi-arrow-up me-1" />
-                Підйом: {advancedOptions.elevationGain}м
-              </div>
-            )}
-            {advancedOptions.avgGradient !== undefined && (
-              <div style={{ fontSize: "0.8rem", marginBottom: 4 }}>
-                <i className="bi bi-percent me-1" />
-                Середній градієнт: {advancedOptions.avgGradient}%
-              </div>
-            )}
-            {advancedOptions.scenicScore !== undefined && (
-              <div style={{ fontSize: "0.8rem", marginBottom: 4 }}>
-                <i className="bi bi-binoculars me-1" />
-                Панорамність: {(advancedOptions.scenicScore * 100).toFixed(0)}%
-              </div>
-            )}
-            {advancedOptions.terrainTypes && advancedOptions.terrainTypes.length > 0 && (
-              <div style={{ fontSize: "0.8rem" }}>
-                <i className="bi bi-shuffle me-1" />
-                Поверхні: {advancedOptions.terrainTypes.join(", ")}
               </div>
             )}
           </div>
@@ -673,5 +604,4 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
 );
 
 RouteMap.displayName = "RouteMap";
-
 export default RouteMap;
