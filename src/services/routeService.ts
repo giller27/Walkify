@@ -220,7 +220,6 @@ async function findSequentialWaypoints(
     options.categories.length > 0 ? options.categories : ['park', 'cafe', 'tourist_attraction']
   );
   const maxAllowedKm = timeToDistanceKm(targetTimeMinutes) * 1.15;
-  const isCircular = routeMode === 'exploration';
   const finalEnd = endLocation ?? startLocation;
 
   const selected: Place[] = [];
@@ -256,9 +255,10 @@ async function findSequentialWaypoints(
 
     const feasible = candidates.filter(candidate => {
       const legKm = getDistanceKm(current, candidate.coordinates);
-      const returnKm = isCircular
-        ? getDistanceKm(candidate.coordinates, startLocation)
-        : getDistanceKm(candidate.coordinates, finalEnd);
+      if (routeMode === 'exploration') {
+        return totalDistKm + legKm <= maxAllowedKm;
+      }
+      const returnKm = getDistanceKm(candidate.coordinates, finalEnd);
       return totalDistKm + legKm + returnKm <= maxAllowedKm;
     });
 
@@ -347,12 +347,10 @@ export async function generateRouteByFilters(
     throw new Error('Для прямого маршруту вкажіть адресу або оберіть точку на карті.');
   }
 
-  let endCoord: [number, number];
+  let endCoord: [number, number] | null = null;
   let destinationPlace: Place | null = null;
 
-  if (routeMode === 'exploration') {
-    endCoord = userLocation;
-  } else {
+  if (routeMode === 'point_to_point') {
     const resolved = await resolveDestination(userLocation, options.destination);
     if (!resolved) {
       throw new Error('Не вдалося знайти вказану адресу. Перевірте правильність написання.');
@@ -371,17 +369,20 @@ export async function generateRouteByFilters(
     categories: options.categories,
     targetTimeMinutes: options.targetTimeMinutes,
     routeMode,
-    endLocation: endCoord,
+    endLocation: endCoord ?? undefined,
   });
 
-  if (sequencedPois.length === 0 && routeMode === 'exploration') {
-    throw new Error(
-      `Не знайдено місць обраних категорій за ~${options.targetTimeMinutes} хв прогулянки. Спробуйте інші категорії або збільште час.`
-    );
+  if (routeMode === 'exploration') {
+    if (sequencedPois.length === 0) {
+      throw new Error(
+        `Не знайдено місць обраних категорій за ~${options.targetTimeMinutes} хв прогулянки. Спробуйте інші категорії або збільште час.`
+      );
+    }
+    endCoord = sequencedPois[sequencedPois.length - 1].coordinates;
   }
 
   if (sequencedPois.length === 0 && routeMode === 'point_to_point') {
-    const directRoute = await buildRoute(userLocation, endCoord, []);
+    const directRoute = await buildRoute(userLocation, endCoord!, []);
     if (destinationPlace) {
       directRoute.waypoints = [{
         location: [destinationPlace.coordinates[1], destinationPlace.coordinates[0]],
@@ -395,7 +396,17 @@ export async function generateRouteByFilters(
     return directRoute;
   }
 
-  const route = await buildFinalRoute(userLocation, endCoord, sequencedPois);
+  const routingPois =
+    routeMode === 'exploration'
+      ? (sequencedPois.length > 1 ? sequencedPois.slice(0, -1) : [])
+      : sequencedPois;
+
+  const route = await buildFinalRoute(userLocation, endCoord!, routingPois);
+
+  if (routeMode === 'exploration') {
+    route.waypoints = placesToWaypoints(sequencedPois);
+    route.locations = sequencedPois.map(wp => wp.name);
+  }
 
   if (destinationPlace) {
     route.waypoints.push({

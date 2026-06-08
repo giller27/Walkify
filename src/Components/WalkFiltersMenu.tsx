@@ -114,7 +114,7 @@ const WalkFiltersMenu: React.FC<WalkFiltersMenuProps> = ({
               className={`btn rounded-start-3 py-2 ${routeMode === "exploration" ? "btn-success" : "btn-outline-secondary"}`}
               onClick={() => setRouteMode("exploration")}
             >
-              🔄 Кільцевий (Прогулянка)
+              🚶 Прогулянка
             </button>
             <button
               type="button"

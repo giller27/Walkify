@@ -359,7 +359,7 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
 
       route.waypoints.forEach((wp, index) => {
         const color = TYPE_COLOR_MAP[wp.type] || TYPE_COLOR_MAP["custom"];
-        const isDestination = wp.type === 'custom' && index === route.waypoints.length - 1;
+        const isDestination = index === route.waypoints.length - 1;
 
         const marker = new google.maps.Marker({
           position: { lat: wp.location[0], lng: wp.location[1] },

@@ -21,7 +21,7 @@ interface WalkPreferencesProps {
 const EXAMPLES = [
   "прогулянка через парк та кав'ярню за 90 хв",
   "до Оперного театру через музей за 1 год",
-  "кільцева прогулянка: пекарня, парк, музей",
+  "прогулянка: пекарня, парк, музей за 90 хв",
   "прогулянка з рестораном та визначним місцем",
 ];
 
@@ -42,7 +42,7 @@ const WalkPreferences: React.FC<WalkPreferencesProps> = ({
       try {
         const parsed = parseRouteRequest(value);
         const parts: string[] = [];
-        if (parsed.isExplorationMode) parts.push("кільцевий");
+        if (parsed.isExplorationMode) parts.push("прогулянка");
         else parts.push("прямий");
         if (parsed.categories.length) parts.push(`місця: ${parsed.categories.join(', ')}`);
         if (parsed.destinationName) parts.push(`до: ${parsed.destinationName}`);
