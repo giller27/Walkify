@@ -13,6 +13,12 @@ import {
   buildCumulativeDistancesKm,
   isLoopRoute,
 } from "../utils/routeTracking";
+import {
+  startWalkProgressSession,
+  updateWalkProgressTraveledKm,
+  finishWalkProgressSession,
+  loadWalkProgress,
+} from "../utils/walkProgressStorage";
 import PlaceInfoCard from "./PlaceInfoCard";
 import NavigationStepsPanel from "./NavigationStepsPanel";
 
@@ -141,6 +147,24 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
       onRouteSummaryRef.current = onRouteSummary;
     }, [onRouteSummary]);
 
+    useEffect(() => {
+      if (!hasActiveRoute) return;
+
+      const logProgress = () => {
+        const progress = loadWalkProgress();
+        if (!progress) return;
+        console.log(
+          '[Walkify] Пройдена відстань:',
+          `${progress.traveledKm.toFixed(3)} км`,
+          `(${progress.isActive ? 'активна прогулянка' : 'завершена'})`
+        );
+      };
+
+      logProgress();
+      const intervalId = window.setInterval(logProgress, 10_000);
+      return () => window.clearInterval(intervalId);
+    }, [hasActiveRoute]);
+
     const updateUserMarker = useCallback((lngLat: [number, number], heading?: number | null) => {
       const map = mapRef.current;
       if (!map) return;
@@ -227,6 +251,8 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
         totalRouteKm
       );
       onRouteSummaryRef.current?.(formatRemainingRouteSummary(stats, route.difficulty));
+
+      updateWalkProgressTraveledKm(maxTraveledKmRef.current, totalRouteKm);
     }, []);
 
     const startLocationTracking = useCallback(() => {
@@ -310,6 +336,7 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
       maxTraveledKmRef.current = 0;
       cumulativeDistancesRef.current = [];
       isLoopRouteRef.current = false;
+      finishWalkProgressSession();
     }, [clearRouteLines]);
 
     const displayRoute = useCallback((route: RouteResult) => {
@@ -326,6 +353,8 @@ const RouteMap = forwardRef<RouteMapRef, RouteMapProps>(
       maxTraveledKmRef.current = 0;
       cumulativeDistancesRef.current = buildCumulativeDistancesKm(route.points);
       isLoopRouteRef.current = isLoopRoute(route.points);
+      const totalRouteKm = cumulativeDistancesRef.current.at(-1) ?? route.distanceKm;
+      startWalkProgressSession(totalRouteKm);
       setHasActiveRoute(true);
       setCurrentStepIndex(0);
       setCurrentStepRemaining(null);
