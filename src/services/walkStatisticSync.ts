@@ -4,8 +4,22 @@ import {
   loadPendingWalkStats,
   markPendingWalkStatSynced,
 } from '../utils/walkProgressStorage';
+import { WALKING_SPEED_KMH } from './waypointOptimizer';
 
 const MIN_SYNC_DISTANCE_KM = 0.05;
+
+function getActiveDurationMinutes(state: WalkProgressState, distanceKm: number): number {
+  if (state.activeDurationSeconds > 0) {
+    return Math.max(1, Math.round(state.activeDurationSeconds / 60));
+  }
+  return Math.max(1, Math.round((distanceKm / WALKING_SPEED_KMH) * 60));
+}
+
+/** Швидкість: км / год */
+function calcSpeedKmh(distanceKm: number, durationMinutes: number): number {
+  if (durationMinutes <= 0) return 0;
+  return parseFloat((distanceKm / (durationMinutes / 60)).toFixed(2));
+}
 
 export interface WalkSessionMeta {
   sessionId: string;
@@ -16,17 +30,12 @@ export interface WalkSessionMeta {
 /** Перетворити локальну сесію прогулянки у формат walk_statistics. */
 export function walkProgressToWalkStatistic(state: WalkProgressState): WalkStatistic {
   const start = new Date(state.startedAt);
-  const end = new Date(state.updatedAt);
-  const durationMs = Math.max(end.getTime() - start.getTime(), 60_000);
-  const durationMinutes = Math.max(1, Math.round(durationMs / 60_000));
 
   const distanceKm = parseFloat(
     Math.min(state.traveledKm, state.routeDistanceKm || state.traveledKm).toFixed(2)
   );
-  const pace =
-    durationMinutes > 0
-      ? parseFloat(((distanceKm / durationMinutes) * 60).toFixed(2))
-      : 0;
+  const durationMinutes = getActiveDurationMinutes(state, distanceKm);
+  const pace = calcSpeedKmh(distanceKm, durationMinutes);
 
   const completionPercent =
     state.routeDistanceKm > 0

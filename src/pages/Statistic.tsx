@@ -70,12 +70,20 @@ function Statistic() {
   );
   const totalRoutes = filteredStatistics.length;
   const averageDistance = totalRoutes > 0 ? totalDistance / totalRoutes : 0;
+  const getWalkDurationMinutes = (stat: WalkStat): number => {
+    if (stat.pace > 0 && stat.distance_km > 0) {
+      return (stat.distance_km / stat.pace) * 60;
+    }
+    return stat.duration_minutes || 0;
+  };
+
   const totalTimeMinutes = filteredStatistics.reduce(
-    (sum, stat) => sum + (stat.duration_minutes || 0),
+    (sum, stat) => sum + getWalkDurationMinutes(stat),
     0
   );
   const totalTimeHours = totalTimeMinutes / 60;
-  const averagePace = totalDistance > 0 ? totalTimeMinutes / totalDistance : 0;
+  const averageSpeedKmh =
+    totalTimeMinutes > 0 ? totalDistance / (totalTimeMinutes / 60) : 0;
 
   // Статистика по днях тижня
   const dayStats: { [key: string]: number } = {
@@ -195,8 +203,8 @@ function Statistic() {
             }
             @media (min-width: 992px) {
               .stat-metric {
-                flex: 0 0 20% !important;
-                max-width: 20% !important;
+                flex: 0 0 25% !important;
+                max-width: 25% !important;
               }
             }
           `}</style>
@@ -258,22 +266,8 @@ function Statistic() {
                     Середня швидкість
                   </Card.Title>
                   <h2 className="mb-0">
-                    {(60 / averagePace).toFixed(2)} км/год
+                    {averageSpeedKmh.toFixed(2)} км/год
                   </h2>
-                </Card.Body>
-              </Card>
-            </Col>
-
-            <Col xs={12} className="stat-metric">
-              <Card className="h-100 border-success">
-                <Card.Body className="text-center">
-                  <div className="display-4 text-success mb-2">
-                    <i className="bi bi-hourglass"></i>
-                  </div>
-                  <Card.Title className="text-muted small">
-                    Тривалість прогулянок
-                  </Card.Title>
-                  <h2 className="mb-0">{averagePace.toFixed(0)} хв/км</h2>
                 </Card.Body>
               </Card>
             </Col>
@@ -373,17 +367,9 @@ function Statistic() {
                         className="d-flex justify-content-between align-items-center mb-3 pb-3 border-bottom"
                       >
                         <div>
-                          <div className="fw-bold">
-                            {stat.notes || "Прогулянка"}
-                          </div>
+                          <div className="fw-bold">Прогулянка</div>
                           <div className="small text-muted">
-                            {new Date(stat.date).toLocaleString("uk-UA", {
-                              day: "2-digit",
-                              month: "2-digit",
-                              year: "numeric",
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
+                            {new Date(stat.date).toLocaleDateString("uk-UA")}
                           </div>
                         </div>
                         <div className="text-end">
@@ -391,7 +377,7 @@ function Statistic() {
                             {stat.distance_km.toFixed(1)} км
                           </div>
                           <div className="small text-muted">
-                            ~{Math.round(stat.duration_minutes)} хв
+                            {stat.pace.toFixed(1)} км/год
                           </div>
                         </div>
                       </div>

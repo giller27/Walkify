@@ -9,6 +9,10 @@ export interface WalkProgressState {
   routeDistanceKm: number;
   startedAt: string;
   updatedAt: string;
+  /** Час активного руху (сек), без пауз */
+  activeDurationSeconds: number;
+  lastMovingAt?: string;
+  lastRecordedTraveledKm?: number;
   isActive: boolean;
   syncedToServer: boolean;
   routeId?: string;
@@ -31,6 +35,7 @@ function readRaw(): WalkProgressState | null {
       ...parsed,
       sessionId: parsed.sessionId ?? createSessionId(),
       syncedToServer: parsed.syncedToServer ?? false,
+      activeDurationSeconds: parsed.activeDurationSeconds ?? 0,
     };
   } catch {
     return null;
@@ -93,6 +98,7 @@ export function startWalkProgressSession(
     routeDistanceKm,
     startedAt: now,
     updatedAt: now,
+    activeDurationSeconds: 0,
     isActive: true,
     syncedToServer: false,
     routeId,
@@ -101,12 +107,35 @@ export function startWalkProgressSession(
   return state;
 }
 
+const MOVEMENT_THRESHOLD_KM = 0.005;
+const MAX_SEGMENT_SECONDS = 30;
+
 export function updateWalkProgressTraveledKm(
   traveledKm: number,
   routeDistanceKm?: number
 ): WalkProgressState {
   const existing = loadWalkProgress();
-  const now = new Date().toISOString();
+  const nowDate = new Date();
+  const now = nowDate.toISOString();
+
+  const prevKm = existing?.lastRecordedTraveledKm ?? existing?.traveledKm ?? 0;
+  const movedKm = Math.max(0, traveledKm - prevKm);
+  let activeDurationSeconds = existing?.activeDurationSeconds ?? 0;
+  let lastMovingAt = existing?.lastMovingAt;
+
+  if (movedKm >= MOVEMENT_THRESHOLD_KM) {
+    const lastTickMs = lastMovingAt
+      ? new Date(lastMovingAt).getTime()
+      : new Date(existing?.startedAt ?? now).getTime();
+    const deltaSec = Math.min(
+      MAX_SEGMENT_SECONDS,
+      Math.max(0, (nowDate.getTime() - lastTickMs) / 1000)
+    );
+    if (deltaSec > 0) {
+      activeDurationSeconds += deltaSec;
+    }
+    lastMovingAt = now;
+  }
 
   const state: WalkProgressState = {
     sessionId: existing?.sessionId ?? createSessionId(),
@@ -114,6 +143,9 @@ export function updateWalkProgressTraveledKm(
     routeDistanceKm: routeDistanceKm ?? existing?.routeDistanceKm ?? 0,
     startedAt: existing?.startedAt ?? now,
     updatedAt: now,
+    activeDurationSeconds,
+    lastMovingAt,
+    lastRecordedTraveledKm: Math.max(traveledKm, prevKm),
     isActive: existing?.isActive ?? true,
     syncedToServer: existing?.syncedToServer ?? false,
     routeId: existing?.routeId,
