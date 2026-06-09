@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { getDistanceKm } from './waypointOptimizer';
 
 // Ініціалізація Supabase клієнта
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
@@ -53,7 +54,7 @@ export interface SavedRoute {
     userRatingsTotal?: number;
     photoUrl?: string;
     description?: string;
-    source?: 'mapbox' | 'osm' | 'google_like' | 'custom';
+    source?: 'google' | 'mapbox' | 'osm' | 'google_like' | 'custom';
   }[];
   statistics: {
     distanceKm: number;
@@ -68,8 +69,17 @@ export interface SavedRoute {
   tags?: string[];
   difficulty?: 'easy' | 'moderate' | 'hard';
   is_public?: boolean;
+  likes_count?: number;
   created_at?: string;
   updated_at?: string;
+}
+
+export interface PublicRoutesOptions {
+  tags?: string[];
+  limit?: number;
+  /** [lng, lat] */
+  userLocation?: [number, number];
+  radiusKm?: number;
 }
 
 export interface UserProfile {
@@ -529,9 +539,11 @@ export async function unpublishRoute(routeId: string) {
 }
 
 /**
- * Отримати публічні маршрути з пошуком
+ * Отримати публічні маршрути (сортування за лайками, опційно — фільтр за радіусом)
  */
-export async function getPublicRoutes(tags?: string[], limit: number = 50) {
+export async function getPublicRoutes(options: PublicRoutesOptions = {}) {
+  const { tags, limit = 50, userLocation, radiusKm } = options;
+
   try {
     let query = supabase
       .from('routes')
@@ -542,20 +554,96 @@ export async function getPublicRoutes(tags?: string[], limit: number = 50) {
       query = query.contains('tags', tags);
     }
 
+    const fetchLimit =
+      userLocation && radiusKm ? Math.max(limit * 4, 100) : limit;
+
     const { data, error } = await query
+      .order('likes_count', { ascending: false })
       .order('created_at', { ascending: false })
-      .limit(limit);
+      .limit(fetchLimit);
 
     if (error) {
       console.error('Error fetching public routes:', error);
       return [];
     }
 
-    return data || [];
+    let routes = (data || []) as SavedRoute[];
+
+    if (userLocation && radiusKm && radiusKm > 0) {
+      routes = routes.filter((route) => {
+        const start = route.points?.[0];
+        if (!start || start.length < 2) return false;
+        const dist = getDistanceKm(userLocation, [start[1], start[0]]);
+        return dist <= radiusKm;
+      });
+    }
+
+    routes.sort((a, b) => {
+      const likesDiff = (b.likes_count ?? 0) - (a.likes_count ?? 0);
+      if (likesDiff !== 0) return likesDiff;
+      return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+    });
+
+    return routes.slice(0, limit);
   } catch (err) {
     console.error('Error in getPublicRoutes:', err);
     return [];
   }
+}
+
+export async function getLikedRouteIds(userId: string): Promise<Set<string>> {
+  const { data, error } = await supabase
+    .from('route_likes')
+    .select('route_id')
+    .eq('user_id', userId);
+
+  if (error) {
+    console.error('Error fetching liked routes:', error);
+    return new Set();
+  }
+
+  return new Set((data || []).map((row) => row.route_id as string));
+}
+
+export async function toggleRouteLike(
+  routeId: string
+): Promise<{ liked: boolean; likesCount: number }> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('User not authenticated');
+
+  const { data: existing } = await supabase
+    .from('route_likes')
+    .select('route_id')
+    .eq('user_id', user.id)
+    .eq('route_id', routeId)
+    .maybeSingle();
+
+  if (existing) {
+    const { error } = await supabase
+      .from('route_likes')
+      .delete()
+      .eq('user_id', user.id)
+      .eq('route_id', routeId);
+    if (error) throw error;
+  } else {
+    const { error } = await supabase
+      .from('route_likes')
+      .insert({ user_id: user.id, route_id: routeId });
+    if (error) throw error;
+  }
+
+  const { data: route, error: routeError } = await supabase
+    .from('routes')
+    .select('likes_count')
+    .eq('id', routeId)
+    .single();
+
+  if (routeError) throw routeError;
+
+  return {
+    liked: !existing,
+    likesCount: route?.likes_count ?? 0,
+  };
 }
 
 /**

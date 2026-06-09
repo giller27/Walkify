@@ -26,6 +26,7 @@ import {
   Route,
   Routes,
   useNavigate,
+  useLocation,
   Link,
 } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
@@ -35,6 +36,9 @@ import {
   UserProfile as UserProfileType,
 } from "../services/supabaseService";
 import { supabase } from "../services/supabaseService";
+import { areUsersBlocked } from "../services/chatService";
+import "../styles/home.css";
+import "../styles/app-pages.css";
 
 interface GoogleUser {
   name: string;
@@ -101,6 +105,7 @@ function NavigationContent() {
           const msg = payload.new as { sender_id: string; content: string };
           // Ignore messages sent by the current user
           if (!user || msg.sender_id === user.id) return;
+          if (await areUsersBlocked(user.id, msg.sender_id)) return;
 
           setHasUnreadMessages(true);
 
@@ -470,22 +475,59 @@ function NavigationContent() {
   );
 }
 
+function isHomePath(pathname: string): boolean {
+  return pathname === "/" || pathname === "/home";
+}
+
+function isAuthPath(pathname: string): boolean {
+  return pathname === "/login" || pathname.startsWith("/auth/");
+}
+
+/** Головна не розмонтовується при переході на інші вкладки — зберігає маршрут і карту. */
+function AppRoutes() {
+  const location = useLocation();
+  const isHome = isHomePath(location.pathname);
+  const [keepHome, setKeepHome] = useState(
+    () => isHomePath(window.location.pathname) && !isAuthPath(window.location.pathname)
+  );
+
+  useEffect(() => {
+    if (isHome) setKeepHome(true);
+  }, [isHome]);
+
+  return (
+    <div className="app-main-content">
+      {keepHome && (
+        <div
+          className={`app-page-layer home-keep-alive ${isHome ? "app-page-front" : "app-page-behind"}`}
+          aria-hidden={!isHome}
+        >
+          <Home isActive={isHome} />
+        </div>
+      )}
+      {!isHome && (
+        <div className="app-page-layer app-page-front app-page-scroll">
+          <Routes location={location}>
+            <Route path="/profile" Component={Profile} />
+            <Route path="/favs" Component={Favorites} />
+            <Route path="/stat" Component={Statistic} />
+            <Route path="/chat" Component={Chat} />
+            <Route path="/chat/:conversationId" Component={Chat} />
+            <Route path="/login" Component={Login} />
+            <Route path="/user/:id" Component={ViewUserProfile} />
+            <Route path="/auth/callback" Component={AuthCallback} />
+          </Routes>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Navigation() {
   return (
     <Router>
       <NavigationContent />
-      <Routes>
-        <Route path="/" Component={Home} />
-        <Route path="/home" Component={Home} />
-        <Route path="/profile" Component={Profile} />
-        <Route path="/favs" Component={Favorites} />
-        <Route path="/stat" Component={Statistic} />
-        <Route path="/chat" Component={Chat} />
-        <Route path="/chat/:conversationId" Component={Chat} />
-        <Route path="/login" Component={Login} />
-        <Route path="/user/:id" Component={ViewUserProfile} />
-        <Route path="/auth/callback" Component={AuthCallback} />
-      </Routes>
+      <AppRoutes />
     </Router>
   );
 }

@@ -1,0 +1,183 @@
+/* Scrollable pages inside fixed app shell (navbar + bottom tabs) */
+.app-page-layer.app-page-scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ---------- Favorites / Routes ---------- */
+.favorites-page {
+  padding: 1rem;
+  padding-bottom: 1.5rem;
+  max-width: 100%;
+}
+
+.favorites-nav {
+  flex-wrap: wrap;
+  gap: 0.125rem;
+}
+
+.favorites-nav .nav-link {
+  font-size: 0.8125rem;
+  padding: 0.5rem 0.65rem;
+  white-space: nowrap;
+}
+
+@media (max-width: 575.98px) {
+  .favorites-nav .nav-link {
+    font-size: 0.75rem;
+    padding: 0.45rem 0.5rem;
+  }
+
+  .favorites-nav .nav-link i {
+    display: none;
+  }
+}
+
+.public-routes-filter .filter-hint {
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.route-card-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.route-card-actions .btn {
+  width: 100%;
+}
+
+.route-card-title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.route-card-title-row .card-title {
+  min-width: 0;
+}
+
+/* ---------- Chat ---------- */
+.chat-page {
+  height: 100%;
+  min-height: 0;
+  padding: 0 !important;
+  margin: 0 !important;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-layout-row {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+}
+
+.chat-sidebar {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.chat-main {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.chat-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  flex-shrink: 0;
+}
+
+.chat-header-info {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
+.chat-header-info h5 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+.chat-messages {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.chat-input-area {
+  flex-shrink: 0;
+}
+
+.chat-search-form {
+  flex-shrink: 0;
+}
+
+.chat-search-results {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.chat-conversation-item {
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.chat-conversation-item:hover {
+  background-color: #f0f9f4;
+}
+
+.chat-conversation-item--active,
+.chat-conversation-item--active:hover {
+  background-color: #198754 !important;
+  color: #fff !important;
+}
+
+.chat-conversation-item--active .text-muted,
+.chat-conversation-item--active small {
+  color: rgba(255, 255, 255, 0.8) !important;
+}
+
+.chat-conversation-item--active .fw-semibold {
+  color: #fff !important;
+}
+
+/* ---------- Profile ---------- */
+.profile-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+@media (min-width: 576px) {
+  .profile-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: stretch;
+  }
+
+  .profile-actions .profile-actions-primary {
+    flex: 1 1 8rem;
+    min-width: 0;
+  }
+
+  .profile-actions .profile-actions-secondary {
+    flex: 0 1 auto;
+  }
+}

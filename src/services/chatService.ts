@@ -31,6 +31,80 @@ export interface ConversationWithOtherUser extends Conversation {
   other_user?: UserProfile;
 }
 
+// ============ USER BLOCKS ============
+
+/** IDs of users involved in a block with the current user (both directions). */
+export async function getBlockedUserIds(): Promise<Set<string>> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return new Set();
+
+  const [{ data: blocked }, { data: blockedBy }] = await Promise.all([
+    supabase.from('user_blocks').select('blocked_id').eq('blocker_id', user.id),
+    supabase.from('user_blocks').select('blocker_id').eq('blocked_id', user.id),
+  ]);
+
+  const ids = new Set<string>();
+  blocked?.forEach((row) => ids.add(row.blocked_id));
+  blockedBy?.forEach((row) => ids.add(row.blocker_id));
+  return ids;
+}
+
+export async function areUsersBlocked(userId: string, otherUserId: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('user_blocks')
+    .select('blocker_id')
+    .or(
+      `and(blocker_id.eq.${userId},blocked_id.eq.${otherUserId}),and(blocker_id.eq.${otherUserId},blocked_id.eq.${userId})`
+    )
+    .limit(1);
+
+  if (error) {
+    console.error('areUsersBlocked:', error);
+    return false;
+  }
+  return (data?.length ?? 0) > 0;
+}
+
+export async function isUserBlockedByMe(otherUserId: string): Promise<boolean> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return false;
+
+  const { data, error } = await supabase
+    .from('user_blocks')
+    .select('blocked_id')
+    .eq('blocker_id', user.id)
+    .eq('blocked_id', otherUserId)
+    .maybeSingle();
+
+  if (error) return false;
+  return !!data;
+}
+
+export async function blockUser(blockedId: string): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('User not authenticated');
+  if (blockedId === user.id) throw new Error('Неможливо заблокувати себе');
+
+  const { error } = await supabase
+    .from('user_blocks')
+    .insert({ blocker_id: user.id, blocked_id: blockedId });
+
+  if (error && error.code !== '23505') throw error;
+}
+
+export async function unblockUser(blockedId: string): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('User not authenticated');
+
+  const { error } = await supabase
+    .from('user_blocks')
+    .delete()
+    .eq('blocker_id', user.id)
+    .eq('blocked_id', blockedId);
+
+  if (error) throw error;
+}
+
 // ============ CONVERSATIONS ============
 
 /**
@@ -43,6 +117,10 @@ export async function getOrCreateConversation(otherUserId: string): Promise<Conv
   // Don't allow chat with self
   if (otherUserId === user.id) {
     throw new Error('Cannot start a conversation with yourself');
+  }
+
+  if (await areUsersBlocked(user.id, otherUserId)) {
+    throw new Error('Неможливо написати цьому користувачу');
   }
 
   // Check if conversation already exists between these two users
@@ -122,6 +200,7 @@ export async function getConversations(): Promise<ConversationWithOtherUser[]> {
   if (partError) throw partError;
   if (!participations || participations.length === 0) return [];
 
+  const blockedIds = await getBlockedUserIds();
   const convIds = participations.map((p) => p.conversation_id);
 
   const { data: convs, error: convError } = await supabase
@@ -144,6 +223,10 @@ export async function getConversations(): Promise<ConversationWithOtherUser[]> {
       .neq('user_id', user.id);
 
     const otherUserId = participants?.[0]?.user_id;
+
+    if (otherUserId && blockedIds.has(otherUserId)) {
+      continue;
+    }
 
     // Get other user profile
     let otherUser: UserProfile | undefined;
@@ -231,6 +314,17 @@ export async function sendMessage(conversationId: string, content: string): Prom
 
   const trimmed = content.trim();
   if (!trimmed) throw new Error('Message cannot be empty');
+
+  const { data: participants } = await supabase
+    .from('conversation_participants')
+    .select('user_id')
+    .eq('conversation_id', conversationId)
+    .neq('user_id', user.id);
+
+  const otherUserId = participants?.[0]?.user_id;
+  if (otherUserId && (await areUsersBlocked(user.id, otherUserId))) {
+    throw new Error('Неможливо надіслати повідомлення цьому користувачу');
+  }
 
   const { data, error } = await supabase
     .from('messages')

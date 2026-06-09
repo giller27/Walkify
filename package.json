@@ -14,20 +14,18 @@
     "bootstrap": "^5.3.8",
     "bootstrap-icons": "^1.13.1",
     "jwt-decode": "^4.0.0",
-    "mapbox-gl": "^3.17.0",
     "react": "^19.2.1",
     "react-bootstrap": "^2.10.10",
     "react-dom": "^19.2.1",
-    "react-map-gl": "^7.1.7",
     "react-router-dom": "^7.9.4"
   },
   "devDependencies": {
-    "@types/mapbox-gl": "^3.0.0",
+    "@types/google.maps": "^3.65.1",
     "@types/react": "^18.0.27",
     "@types/react-dom": "^18.0.10",
     "@vitejs/plugin-react": "^5.1.2",
     "baseline-browser-mapping": "^2.9.11",
-    "typescript": "^4.9.3",
+    "typescript": "^6.0.3",
     "vite": "^7.3.0"
   }
 }

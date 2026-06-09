@@ -36,7 +36,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
             <hr />
             <p className="mb-0">
               <small>
-                Будь ласка, переконайтесь, що файл містить <code>.env.local</code>{" "}
+                Будь ласка, переконайтесь, що файл <code>.env.local</code>{" "}
                 містить:
                 <br />
                 <code>VITE_SUPABASE_URL=...</code>

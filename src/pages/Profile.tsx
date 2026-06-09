@@ -8,7 +8,6 @@ import {
   Form,
   Spinner,
   Alert,
-  Modal,
 } from "react-bootstrap";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
@@ -30,9 +29,7 @@ const Profile: React.FC = () => {
   const [isEditing, setIsEditing] = useState(
     searchParams.get("edit") === "true"
   );
-  const [showStats, setShowStats] = useState(false);
   const [statistics, setStatistics] = useState<WalkStatistic[]>([]);
-  const [statsLoading, setStatsLoading] = useState(false);
 
   const [formData, setFormData] = useState({
     full_name: "",
@@ -117,18 +114,14 @@ const Profile: React.FC = () => {
 
   const handleLoadStatistics = async () => {
     if (!currentUser) return;
-    setStatsLoading(true);
     try {
       const stats = await getUserWalkStatistics(currentUser.id);
       setStatistics(stats);
     } catch (err) {
       setError((err as Error).message);
-    } finally {
-      setStatsLoading(false);
     }
   };
 
-  // Розрахунок загальної статистики
   const calculateStats = () => {
     const totalDistance = statistics.reduce(
       (sum, stat) => sum + (stat.distance_km || 0),
@@ -138,12 +131,10 @@ const Profile: React.FC = () => {
       (sum, stat) => sum + (stat.duration_minutes || 0),
       0
     );
-    const avgSpeed = totalTime > 0 ? (totalDistance * 60) / totalTime : 0; // км/год
     return {
       walks: statistics.length,
       distance: totalDistance,
       time: totalTime,
-      pace: avgSpeed,
     };
   };
 
@@ -246,34 +237,26 @@ const Profile: React.FC = () => {
                   )}
 
                   <Row className="mb-4 text-center">
-                    <Col xs={6} className="mb-3">
+                    <Col xs={4} className="mb-3">
                       <div className="stat-box">
                         <h5 className="mb-1">{calculateStats().walks}</h5>
-                        <p className="text-muted">Прогулянок</p>
+                        <p className="text-muted small">Прогулянок</p>
                       </div>
                     </Col>
-                    <Col xs={6} className="mb-3">
+                    <Col xs={4} className="mb-3">
                       <div className="stat-box">
                         <h5 className="mb-1">
-                          {calculateStats().distance.toFixed(1)}км
+                          {calculateStats().distance.toFixed(1)} км
                         </h5>
-                        <p className="text-muted">Відстань</p>
+                        <p className="text-muted small">Відстань</p>
                       </div>
                     </Col>
-                    <Col xs={6}>
+                    <Col xs={4} className="mb-3">
                       <div className="stat-box">
                         <h5 className="mb-1">
-                          {Math.round(calculateStats().time)}хв
+                          {Math.round(calculateStats().time)} хв
                         </h5>
-                        <p className="text-muted">Загальний час</p>
-                      </div>
-                    </Col>
-                    <Col xs={6}>
-                      <div className="stat-box">
-                        <h5 className="mb-1">
-                          {calculateStats().pace.toFixed(2)}км/год
-                        </h5>
-                        <p className="text-muted">Середня швидкість</p>
+                        <p className="text-muted small">Час</p>
                       </div>
                     </Col>
                   </Row>
@@ -285,18 +268,6 @@ const Profile: React.FC = () => {
                   >
                     <i className="bi bi-pencil me-2"></i>
                     Редагувати профіль
-                  </Button>
-
-                  <Button
-                    variant="outline-info"
-                    className="w-100 mb-2"
-                    onClick={() => {
-                      setShowStats(true);
-                      handleLoadStatistics();
-                    }}
-                  >
-                    <i className="bi bi-graph-up me-2"></i>
-                    Переглянути статистику
                   </Button>
 
                   <Button
@@ -388,48 +359,6 @@ const Profile: React.FC = () => {
         </Col>
       </Row>
 
-      <Modal show={showStats} onHide={() => setShowStats(false)} size="lg">
-        <Modal.Header closeButton>
-          <Modal.Title>Статистика ваших прогулянок</Modal.Title>
-        </Modal.Header>
-        <Modal.Body>
-          {statsLoading ? (
-            <div className="text-center">
-              <Spinner animation="border" />
-            </div>
-          ) : statistics.length === 0 ? (
-            <p className="text-muted text-center">
-              Записів про прогулянки ще немає. Починайте гуляти, щоб
-              відстежувати прогрес!
-            </p>
-          ) : (
-            <div className="table-responsive">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Дата</th>
-                    <th>Відстань (км)</th>
-                    <th>Час (хв)</th>
-                    <th>Темп (км/год)</th>
-                    <th>Настрій</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {statistics.map((stat) => (
-                    <tr key={stat.id}>
-                      <td>{new Date(stat.date).toLocaleDateString()}</td>
-                      <td>{stat.distance_km.toFixed(2)}</td>
-                      <td>{stat.duration_minutes}</td>
-                      <td>{stat.pace.toFixed(2)}</td>
-                      <td>{stat.mood || "-"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Modal.Body>
-      </Modal>
     </Container>
   );
 };

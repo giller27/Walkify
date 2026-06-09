@@ -12,7 +12,7 @@ import {
 } from "react-bootstrap";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { getUserProfile } from "../services/supabaseService";
+import { getUserProfile, searchUsers, type UserProfile } from "../services/supabaseService";
 import {
   getConversations,
   getOrCreateConversation,
@@ -20,6 +20,10 @@ import {
   sendMessage,
   subscribeToMessages,
   unsubscribeFromChannel,
+  blockUser,
+  unblockUser,
+  isUserBlockedByMe,
+  areUsersBlocked,
   type ConversationWithOtherUser,
   type Message,
 } from "../services/chatService";
@@ -62,6 +66,12 @@ function Chat() {
   const [notificationPermission, setNotificationPermission] =
     useState<NotificationPermission | "unsupported">("default");
   const [sharedRoute, setSharedRoute] = useState<SharedRoutePreview | null>(null);
+  const [isBlockedByMe, setIsBlockedByMe] = useState(false);
+  const [isChatBlocked, setIsChatBlocked] = useState(false);
+  const [blockLoading, setBlockLoading] = useState(false);
+  const [userSearchQuery, setUserSearchQuery] = useState("");
+  const [userSearchResults, setUserSearchResults] = useState<UserProfile[]>([]);
+  const [userSearchLoading, setUserSearchLoading] = useState(false);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -222,12 +232,73 @@ function Chat() {
   }, [activeConversation?.id]);
 
   useEffect(() => {
+    const otherId = activeConversation?.other_user?.id;
+    if (!otherId || !user) {
+      setIsBlockedByMe(false);
+      setIsChatBlocked(false);
+      return;
+    }
+
+    Promise.all([
+      isUserBlockedByMe(otherId),
+      areUsersBlocked(user.id, otherId),
+    ]).then(([byMe, blocked]) => {
+      setIsBlockedByMe(byMe);
+      setIsChatBlocked(blocked);
+    });
+  }, [activeConversation?.other_user?.id, user]);
+
+  useEffect(() => {
     scrollToBottom();
   }, [messages, scrollToBottom]);
 
   const handleSelectConversation = (conv: ConversationWithOtherUser) => {
     setActiveConversation(conv);
     navigate(`/chat/${conv.id}`);
+  };
+
+  const handleUserSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const q = userSearchQuery.trim();
+    if (!q) {
+      setUserSearchResults([]);
+      return;
+    }
+
+    setUserSearchLoading(true);
+    try {
+      const results = await searchUsers(q);
+      setUserSearchResults(
+        results.filter((profile) => profile.id !== user?.id)
+      );
+    } catch (err) {
+      console.error("User search error:", err);
+      setUserSearchResults([]);
+    } finally {
+      setUserSearchLoading(false);
+    }
+  };
+
+  const handleStartChatWithUser = async (otherUserId: string) => {
+    try {
+      setError(null);
+      const conv = await getOrCreateConversation(otherUserId);
+      const otherProfile = await getUserProfile(otherUserId);
+      const withUser: ConversationWithOtherUser = {
+        ...conv,
+        other_user: otherProfile || undefined,
+      };
+      setActiveConversation(withUser);
+      const refreshed = await loadConversations();
+      setConversations(refreshed);
+      setUserSearchQuery("");
+      setUserSearchResults([]);
+      navigate(`/chat/${conv.id}`);
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Не вдалося почати чат";
+      setError(message);
+    }
   };
 
   const handleSend = async (e: React.FormEvent) => {
@@ -263,6 +334,37 @@ function Chat() {
     }
   };
 
+  const handleToggleBlock = async () => {
+    const otherId = activeConversation?.other_user?.id;
+    if (!otherId) return;
+
+    const confirmMsg = isBlockedByMe
+      ? "Розблокувати цього користувача?"
+      : "Заблокувати цього користувача? Ви не зможете обмінюватися повідомленнями.";
+    if (!window.confirm(confirmMsg)) return;
+
+    setBlockLoading(true);
+    try {
+      if (isBlockedByMe) {
+        await unblockUser(otherId);
+        setIsBlockedByMe(false);
+        setIsChatBlocked(false);
+      } else {
+        await blockUser(otherId);
+        setIsBlockedByMe(true);
+        setIsChatBlocked(true);
+        setActiveConversation(null);
+        navigate("/chat");
+        await loadConversations();
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Помилка блокування";
+      setError(message);
+    } finally {
+      setBlockLoading(false);
+    }
+  };
+
   const handleOpenSharedRoute = (route: SharedRoutePreview) => {
     if (route.points && Array.isArray(route.points)) {
       localStorage.setItem(
@@ -295,15 +397,17 @@ function Chat() {
 
   if (authLoading) {
     return (
-      <Container className="mt-5 pt-5 text-center">
-        <Spinner animation="border" variant="success" />
-        <p className="mt-3">Loading...</p>
+      <Container className="chat-page d-flex align-items-center justify-content-center">
+        <div className="text-center py-4">
+          <Spinner animation="border" variant="success" />
+          <p className="mt-3 mb-0">Loading...</p>
+        </div>
       </Container>
     );
   }
   if (!user) {
     return (
-      <Container className="mt-5 pt-5 text-center">
+      <Container className="chat-page text-center py-4">
         <Alert variant="warning">Please log in to use chat.</Alert>
         <Button variant="success" onClick={() => navigate("/login")}>
           Log in
@@ -313,21 +417,72 @@ function Chat() {
   }
 
   return (
-    <Container fluid className="chat-container mt-5 pt-4 pb-5">
-      <Row className="g-0 h-100" style={{ minHeight: "calc(100vh - 180px)" }}>
+    <Container fluid className="chat-page">
+      <Row className="g-0 chat-layout-row">
         {/* Conversation list */}
         <Col
           xs={12}
           md={4}
           lg={3}
-          className="border-end bg-light"
-          style={{ maxHeight: "calc(100vh - 180px)", overflowY: "auto" }}
+          className={`border-end bg-light chat-sidebar ${
+            activeConversation ? "d-none d-md-block" : ""
+          }`}
         >
           <div className="p-3 border-bottom bg-white">
-            <h5 className="mb-0">
+            <h5 className="mb-3">
               <i className="bi bi-chat-dots me-2"></i>
-              Messages
+              Повідомлення
             </h5>
+            <Form onSubmit={handleUserSearch} className="chat-search-form">
+              <div className="d-flex gap-2">
+                <Form.Control
+                  type="search"
+                  size="sm"
+                  placeholder="Пошук користувачів..."
+                  value={userSearchQuery}
+                  onChange={(e) => setUserSearchQuery(e.target.value)}
+                />
+                <Button
+                  type="submit"
+                  variant="success"
+                  size="sm"
+                  disabled={userSearchLoading}
+                >
+                  {userSearchLoading ? (
+                    <Spinner animation="border" size="sm" />
+                  ) : (
+                    <i className="bi bi-search"></i>
+                  )}
+                </Button>
+              </div>
+            </Form>
+            {userSearchResults.length > 0 && (
+              <ListGroup variant="flush" className="chat-search-results mt-2 border rounded">
+                {userSearchResults.map((result) => (
+                  <ListGroup.Item
+                    key={result.id}
+                    action
+                    className="d-flex align-items-center gap-2 py-2"
+                    onClick={() => handleStartChatWithUser(result.id)}
+                  >
+                    <img
+                      src={result.avatar_url || userAvatar}
+                      alt=""
+                      className="rounded-circle flex-shrink-0"
+                      style={{ width: 32, height: 32, objectFit: "cover" }}
+                    />
+                    <div className="min-width-0">
+                      <div className="fw-semibold text-truncate small">
+                        {result.full_name || "Користувач"}
+                      </div>
+                      <small className="text-muted text-truncate d-block">
+                        {result.email}
+                      </small>
+                    </div>
+                  </ListGroup.Item>
+                ))}
+              </ListGroup>
+            )}
           </div>
 
           {loading ? (
@@ -353,10 +508,10 @@ function Chat() {
                   <ListGroup.Item
                     key={conv.id}
                     action
-                    active={isActive}
                     onClick={() => handleSelectConversation(conv)}
-                    className="d-flex align-items-center py-3 border-0 border-bottom rounded-0"
-                    style={{ cursor: "pointer" }}
+                    className={`d-flex align-items-center py-3 border-0 border-bottom rounded-0 chat-conversation-item ${
+                      isActive ? "chat-conversation-item--active" : ""
+                    }`}
                   >
                     <img
                       src={conv.other_user?.avatar_url || userAvatar}
@@ -387,38 +542,78 @@ function Chat() {
         </Col>
 
         {/* Chat area */}
-        <Col xs={12} md={8} lg={9} className="d-flex flex-column bg-white">
+        <Col
+          xs={12}
+          md={8}
+          lg={9}
+          className={`d-flex flex-column bg-white chat-main ${
+            !activeConversation ? "d-none d-md-flex" : ""
+          }`}
+        >
           {activeConversation ? (
             <>
               {/* Chat header */}
-              <div className="p-3 border-bottom d-flex align-items-center">
+              <div className="p-3 border-bottom chat-header">
+                <Button
+                  variant="link"
+                  className="d-md-none p-0 text-success flex-shrink-0"
+                  onClick={() => {
+                    setActiveConversation(null);
+                    navigate("/chat");
+                  }}
+                  aria-label="Назад до списку"
+                >
+                  <i className="bi bi-arrow-left fs-5"></i>
+                </Button>
                 <img
                   src={activeConversation.other_user?.avatar_url || userAvatar}
                   alt=""
-                  className="rounded-circle me-2"
+                  className="rounded-circle flex-shrink-0"
                   style={{ width: 40, height: 40, objectFit: "cover" }}
                 />
-                <div className="flex-grow-1">
+                <div className="chat-header-info">
                   <h5 className="mb-0">
                     {activeConversation.other_user?.full_name || "Unknown"}
                   </h5>
+                  {isChatBlocked && (
+                    <small className="text-muted d-block">
+                      {isBlockedByMe
+                        ? "Користувача заблоковано"
+                        : "Повідомлення недоступні"}
+                    </small>
+                  )}
                 </div>
-                {notificationPermission === "default" && (
-                  <Button
-                    variant="outline-success"
-                    size="sm"
-                    onClick={handleEnableNotifications}
-                  >
-                    Enable notifications
-                  </Button>
-                )}
+                <div className="chat-header-actions">
+                  {activeConversation.other_user?.id && (
+                    <Button
+                      variant={isBlockedByMe ? "outline-secondary" : "outline-danger"}
+                      size="sm"
+                      onClick={handleToggleBlock}
+                      disabled={blockLoading}
+                    >
+                      {blockLoading ? (
+                        <Spinner animation="border" size="sm" />
+                      ) : isBlockedByMe ? (
+                        "Розблокувати"
+                      ) : (
+                        "Заблокувати"
+                      )}
+                    </Button>
+                  )}
+                  {notificationPermission === "default" && (
+                    <Button
+                      variant="outline-success"
+                      size="sm"
+                      onClick={handleEnableNotifications}
+                    >
+                      Сповіщення
+                    </Button>
+                  )}
+                </div>
               </div>
 
               {/* Messages */}
-              <div
-                className="flex-grow-1 overflow-auto p-3"
-                style={{ maxHeight: "400px" }}
-              >
+              <div className="chat-messages p-3">
                 {messages.map((msg) => {
                   const isOwn = msg.sender_id === user.id;
                   let routeShare: RouteShareMessagePayload | null = null;
@@ -527,7 +722,12 @@ function Chat() {
               </div>
 
               {/* Message input */}
-              <Form onSubmit={handleSend} className="p-3 border-top">
+              {isChatBlocked && !isBlockedByMe && (
+                <Alert variant="warning" className="m-3 mb-0 py-2">
+                  Цей користувач недоступний для листування.
+                </Alert>
+              )}
+              <Form onSubmit={handleSend} className="p-3 border-top chat-input-area">
                 {sharedRoute && (
                   <div className="mb-2 p-2 rounded bg-light border d-flex align-items-center">
                     <div className="flex-grow-1">
@@ -558,12 +758,16 @@ function Chat() {
                     placeholder="Type a message..."
                     value={newMessage}
                     onChange={(e) => setNewMessage(e.target.value)}
-                    disabled={sending}
+                    disabled={sending || isChatBlocked}
                   />
                   <Button
                     type="submit"
                     variant="success"
-                    disabled={sending || (!newMessage.trim() && !sharedRoute) || sending}
+                    disabled={
+                      sending ||
+                      isChatBlocked ||
+                      (!newMessage.trim() && !sharedRoute)
+                    }
                   >
                     {sending ? (
                       <Spinner animation="border" size="sm" />
